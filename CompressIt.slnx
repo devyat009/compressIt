@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="CompressIt.Core/CompressIt.Core.csproj" />
+  <Project Path="CompressIt.Tests/CompressIt.Tests.csproj" />
+  <Project Path="CompressIt/CompressIt.csproj" />
+</Solution>
