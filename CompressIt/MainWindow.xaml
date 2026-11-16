@@ -957,6 +957,7 @@
                                             <TextBlock Text="{Binding AuthorNameText}" FontSize="12" FontWeight="SemiBold" Foreground="#FFFFFFFF" />
                                         </StackPanel>
                                         <TextBlock Text="{Binding AuthorGitHubUrl}" FontSize="11" Foreground="#4ADE80" Margin="0,2,0,0" />
+                                        <TextBlock Text="License: PolyForm Noncommercial 1.0.0 (Not for Sale)" FontSize="11" Foreground="#94A3B8" Margin="0,4,0,0" />
                                     </StackPanel>
                                 </DockPanel>
                             </Border>

@@ -37,6 +37,7 @@ public sealed class UpdateService
     public const string AuthorName = "Devyat009";
     public const string AuthorGitHubUrl = "https://github.com/devyat009/";
     public const string LatestReleaseApiUrl = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
+    public const string AllReleasesApiUrl = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases?per_page=5";
     public const string ReleasesPageUrl = $"https://github.com/{RepoOwner}/{RepoName}/releases";
 
     public static Version GetCurrentVersion()
@@ -167,6 +168,36 @@ public sealed class UpdateService
 
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
+                // Fallback to /releases in case the release was marked as a pre-release
+                using var listResponse = await http.GetAsync(AllReleasesApiUrl, ct);
+                if (listResponse.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return new UpdateInfo
+                    {
+                        CurrentVersion = current,
+                        LatestVersion = current,
+                        HasReleases = false,
+                        IsUpdateAvailable = false,
+                        ReleasePageUrl = ReleasesPageUrl,
+                        ErrorMessage = "No public releases found (verify repository and release are Public)."
+                    };
+                }
+
+                listResponse.EnsureSuccessStatusCode();
+                string listJson = await listResponse.Content.ReadAsStringAsync(ct);
+                using var arrDoc = JsonDocument.Parse(listJson);
+                if (arrDoc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in arrDoc.RootElement.EnumerateArray())
+                    {
+                        bool isDraft = item.TryGetProperty("draft", out var dEl) && dEl.GetBoolean();
+                        if (!isDraft)
+                        {
+                            return ParseReleaseJson(item.GetRawText(), current);
+                        }
+                    }
+                }
+
                 return new UpdateInfo
                 {
                     CurrentVersion = current,
