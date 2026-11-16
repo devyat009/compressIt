@@ -42,6 +42,7 @@ public partial class MainWindow : FluentWindow
         VideoTimeline.SeekRequested += ts => SeekPlayer(ts);
         VideoTimeline.SegmentSelected += id => _vm.SelectedSegmentId = id;
         VideoTimeline.SegmentIncludeToggled += id => _vm.ToggleSegmentInclude(id);
+        VideoTimeline.SegmentBoundaryAdjustRequested += (id, isStart, ts) => _vm.AdjustSegmentBoundary(id, isStart, ts);
 
         App.ExternalFileRequested += OnExternalFileRequested;
     }

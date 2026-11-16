@@ -118,6 +118,71 @@ public static class SegmentManager
         return list;
     }
 
+    public static List<VideoSegment> AdjustSegmentStart(
+        IReadOnlyList<VideoSegment> segments,
+        Guid segmentId,
+        TimeSpan newStart,
+        TimeSpan totalDuration,
+        TimeSpan? minSegmentDuration = null)
+    {
+        var minDur = minSegmentDuration ?? DefaultMinSegmentDuration;
+        var list = CloneSegments(segments);
+        int idx = list.FindIndex(s => s.Id == segmentId);
+        if (idx < 0) return list;
+
+        var current = list[idx];
+        var minAllowed = idx == 0 ? TimeSpan.Zero : list[idx - 1].End;
+        var maxAllowed = current.End - minDur;
+        if (minAllowed <= maxAllowed)
+        {
+            current.Start = Clamp(newStart, minAllowed, maxAllowed);
+        }
+
+        Reindex(list);
+        return list;
+    }
+
+    public static List<VideoSegment> AdjustSegmentEnd(
+        IReadOnlyList<VideoSegment> segments,
+        Guid segmentId,
+        TimeSpan newEnd,
+        TimeSpan totalDuration,
+        TimeSpan? minSegmentDuration = null)
+    {
+        var minDur = minSegmentDuration ?? DefaultMinSegmentDuration;
+        var list = CloneSegments(segments);
+        int idx = list.FindIndex(s => s.Id == segmentId);
+        if (idx < 0) return list;
+
+        var current = list[idx];
+        var minAllowed = current.Start + minDur;
+        var maxAllowed = idx == list.Count - 1 ? totalDuration : list[idx + 1].Start;
+        if (minAllowed <= maxAllowed)
+        {
+            current.End = Clamp(newEnd, minAllowed, maxAllowed);
+        }
+
+        Reindex(list);
+        return list;
+    }
+
+    private static List<VideoSegment> CloneSegments(IReadOnlyList<VideoSegment> segments) =>
+        segments.Select(s => new VideoSegment
+        {
+            Id = s.Id,
+            Index = s.Index,
+            Start = s.Start,
+            End = s.End,
+            IsIncluded = s.IsIncluded
+        }).ToList();
+
+    private static TimeSpan Clamp(TimeSpan value, TimeSpan min, TimeSpan max)
+    {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+
     public static TimeSpan GetTotalIncludedDuration(IEnumerable<VideoSegment> segments)
     {
         var total = TimeSpan.Zero;

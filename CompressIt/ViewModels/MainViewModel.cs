@@ -104,6 +104,11 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private IReadOnlyList<VideoSegment> _segments = Array.Empty<VideoSegment>();
     [ObservableProperty] private Guid? _selectedSegmentId;
     [ObservableProperty] private IReadOnlyList<string> _thumbnailPaths = Array.Empty<string>();
+    [ObservableProperty] private double _timelineZoomLevel = 1.0;
+
+    public string TimelineZoomLabel => $"{TimelineZoomLevel:0.0}x";
+
+    partial void OnTimelineZoomLevelChanged(double value) => OnPropertyChanged(nameof(TimelineZoomLabel));
 
     [ObservableProperty] private CodecOption _selectedCodecOption;
     [ObservableProperty] private SpeedOption _selectedSpeedOption;
@@ -530,6 +535,7 @@ public partial class MainViewModel : ObservableObject
             HasVideo = true;
             VideoDuration = meta.Duration;
             PlayheadPosition = TimeSpan.Zero;
+            TimelineZoomLevel = 1.0;
 
             var initialSegments = SegmentManager.CreateInitial(meta.Duration);
             Segments = initialSegments;
@@ -634,6 +640,45 @@ public partial class MainViewModel : ObservableObject
     {
         Segments = SegmentManager.ToggleInclude(Segments, segmentId);
         SelectedSegmentId = segmentId;
+    }
+
+    public void AdjustSegmentBoundary(Guid segmentId, bool isStartHandle, TimeSpan newTime)
+    {
+        if (CurrentVideo is null) return;
+
+        var updated = isStartHandle
+            ? SegmentManager.AdjustSegmentStart(Segments, segmentId, newTime, VideoDuration)
+            : SegmentManager.AdjustSegmentEnd(Segments, segmentId, newTime, VideoDuration);
+
+        Segments = updated;
+        SelectedSegmentId = segmentId;
+
+        var seg = updated.FirstOrDefault(s => s.Id == segmentId);
+        if (seg is not null)
+        {
+            var clampedTime = isStartHandle ? seg.Start : seg.End;
+            PlayheadPosition = clampedTime;
+            PlayerSeekRequested?.Invoke(clampedTime);
+        }
+    }
+
+    [RelayCommand]
+    private void ZoomInTimeline()
+    {
+        TimelineZoomLevel = Math.Clamp(TimelineZoomLevel * 1.4, 1.0, 24.0);
+    }
+
+    [RelayCommand]
+    private void ZoomOutTimeline()
+    {
+        double next = TimelineZoomLevel / 1.4;
+        TimelineZoomLevel = next < 1.1 ? 1.0 : next;
+    }
+
+    [RelayCommand]
+    private void ResetTimelineZoom()
+    {
+        TimelineZoomLevel = 1.0;
     }
 
     [RelayCommand]

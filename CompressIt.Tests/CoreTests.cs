@@ -54,6 +54,30 @@ public class CoreTests
     }
 
     [Fact]
+    public void SegmentManager_AdjustBoundaries_CreatesGapAndClampsAtNeighborOrEdge()
+    {
+        var total = TimeSpan.FromSeconds(60);
+        var segs = SegmentManager.SplitAt(SegmentManager.CreateInitial(total), TimeSpan.FromSeconds(30));
+
+        // Trim start of first segment with "<" handle -> [5s, 30s]
+        segs = SegmentManager.AdjustSegmentStart(segs, segs[0].Id, TimeSpan.FromSeconds(5), total);
+        Assert.Equal(TimeSpan.FromSeconds(5), segs[0].Start);
+
+        // Trim end of segment 1 inward with ">" -> [5s, 22s], leaving gray cut-out gap [22s, 30s] before segment 2
+        segs = SegmentManager.AdjustSegmentEnd(segs, segs[0].Id, TimeSpan.FromSeconds(22), total);
+        Assert.Equal(TimeSpan.FromSeconds(22), segs[0].End);
+        Assert.Equal(TimeSpan.FromSeconds(30), segs[1].Start);
+
+        // Expanding segment 2's "<" leftward stops cleanly at segment 1's end (22s), never overlapping
+        segs = SegmentManager.AdjustSegmentStart(segs, segs[1].Id, TimeSpan.FromSeconds(10), total);
+        Assert.Equal(TimeSpan.FromSeconds(22), segs[1].Start);
+
+        // Trim end of last segment with ">" handle -> [22s, 52s]
+        segs = SegmentManager.AdjustSegmentEnd(segs, segs[1].Id, TimeSpan.FromSeconds(52), total);
+        Assert.Equal(TimeSpan.FromSeconds(52), segs[1].End);
+    }
+
+    [Fact]
     public void FfmpegCommandBuilder_PrefersGpuForMatchingVendor_AndFallsBackToCpuWhenDisabled()
     {
         var hw = new HardwareCapabilities
