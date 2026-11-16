@@ -10,6 +10,7 @@
     <AssemblyName>CompressIt-Setup</AssemblyName>
     <RootNamespace>CompressIt.Installer</RootNamespace>
     <ApplicationIcon>..\CompressIt\Assets\CompressIt.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>

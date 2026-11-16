@@ -12,9 +12,12 @@ public static class InstallerService
     private const string UninstallRegKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\CompressIt";
 
     public static string DefaultInstallDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "CompressIt");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "CompressIt");
 
-    private static string StartMenuShortcutPath =>
+    private static string CommonStartMenuShortcutPath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), "CompressIt.lnk");
+
+    private static string UserStartMenuShortcutPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "CompressIt.lnk");
 
     private static string DesktopShortcutPath =>
@@ -61,7 +64,7 @@ public static class InstallerService
         progress.Report((90, "Creating Windows shortcuts..."));
         if (createStartMenuShortcut)
         {
-            CreateShortcut(StartMenuShortcutPath, installedExe, installDir, "CompressIt Video Cutter & Compressor");
+            CreateShortcut(CommonStartMenuShortcutPath, installedExe, installDir, "CompressIt Video Cutter & Compressor");
         }
         if (createDesktopShortcut)
         {
@@ -92,15 +95,13 @@ public static class InstallerService
         ShellIntegrationService.Unregister();
 
         progress.Report((60, "Removing shortcuts..."));
-        TryDeleteFile(StartMenuShortcutPath);
+        TryDeleteFile(CommonStartMenuShortcutPath);
+        TryDeleteFile(UserStartMenuShortcutPath);
         TryDeleteFile(DesktopShortcutPath);
 
         progress.Report((80, "Removing Windows Uninstall registration..."));
-        try
-        {
-            Registry.CurrentUser.DeleteSubKeyTree(UninstallRegKey, throwOnMissingSubKey: false);
-        }
-        catch { }
+        try { Registry.LocalMachine.DeleteSubKeyTree(UninstallRegKey, throwOnMissingSubKey: false); } catch { }
+        try { Registry.CurrentUser.DeleteSubKeyTree(UninstallRegKey, throwOnMissingSubKey: false); } catch { }
 
         string targetDir = !string.IsNullOrWhiteSpace(installDir) && Directory.Exists(installDir)
             ? installDir
@@ -212,7 +213,7 @@ public static class InstallerService
 
     private static void RegisterUninstallEntry(string installDir, string exePath, string uninstallExe, string version)
     {
-        using var key = Registry.CurrentUser.CreateSubKey(UninstallRegKey);
+        using var key = Registry.LocalMachine.CreateSubKey(UninstallRegKey);
         key.SetValue("DisplayName", "CompressIt");
         key.SetValue("DisplayVersion", version);
         key.SetValue("Publisher", UpdateService.AuthorName);

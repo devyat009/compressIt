@@ -309,12 +309,17 @@ del "%~f0"
 """;
             File.WriteAllText(scriptPath, cmdContent);
 
+            bool needsAdmin = currentAppDirectory.StartsWith(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                StringComparison.OrdinalIgnoreCase);
+
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
                 Arguments = $"/c \"{scriptPath}\"",
                 CreateNoWindow = true,
-                UseShellExecute = false
+                UseShellExecute = needsAdmin,
+                Verb = needsAdmin ? "runas" : string.Empty
             });
             return;
         }
