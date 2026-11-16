@@ -5,3 +5,5 @@ obj/
 *.suo
 *.cache
 TestResults/
+dist/
+CompressIt.Installer/Payload/

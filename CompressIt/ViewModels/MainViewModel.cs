@@ -22,6 +22,7 @@ public partial class MainViewModel : ObservableObject
     private readonly FFmpegDownloadService _ffmpegDownloader = new();
     private readonly HardwareDetectorService _hardwareDetector = new();
     private readonly VideoProcessingService _videoProcessor = new();
+    private readonly UpdateService _updateService = new();
 
     private CancellationTokenSource? _exportCts;
     private CancellationTokenSource? _thumbCts;
@@ -135,6 +136,29 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private CompressionResult? _lastResult;
     [ObservableProperty] private string? _errorBannerText;
 
+    [ObservableProperty] private bool _autoCheckUpdates = true;
+    [ObservableProperty] private bool _isCheckingUpdates;
+    [ObservableProperty] private string _updateStatusText = "Not checked yet";
+    [ObservableProperty] private bool _isUpdatePopupOpen;
+    [ObservableProperty] private UpdateInfo? _availableUpdate;
+    [ObservableProperty] private bool _isDownloadingUpdate;
+    [ObservableProperty] private double _updateDownloadPercent;
+    [ObservableProperty] private string _updateDownloadStatus = string.Empty;
+    [ObservableProperty] private string? _updateErrorText;
+
+    public string AppVersionText => UpdateService.FormatVersion(UpdateService.GetCurrentVersion());
+    public string AuthorNameText => UpdateService.AuthorName;
+    public string AuthorGitHubUrl => UpdateService.AuthorGitHubUrl;
+    public bool IsNotCheckingUpdates => !IsCheckingUpdates;
+    public bool IsNotDownloadingUpdate => !IsDownloadingUpdate;
+
+    public string UpdateVersionTransitionText => AvailableUpdate is null
+        ? AppVersionText
+        : $"{UpdateService.FormatVersion(AvailableUpdate.CurrentVersion)}  →  {UpdateService.FormatVersion(AvailableUpdate.LatestVersion)}";
+
+    public bool CanInstallUpdatePackage =>
+        !string.IsNullOrWhiteSpace(AvailableUpdate?.AssetDownloadUrl) && !IsDownloadingUpdate;
+
     public bool HasErrorBanner
     {
         get => !string.IsNullOrWhiteSpace(ErrorBannerText);
@@ -147,7 +171,7 @@ public partial class MainViewModel : ObservableObject
     partial void OnErrorBannerTextChanged(string? value) => OnPropertyChanged(nameof(HasErrorBanner));
 
     public bool IsAnyOverlayOpen =>
-        IsInitializingFfmpeg || IsSettingsOpen || IsExportConfigOpen || IsExporting || IsResultOpen;
+        IsInitializingFfmpeg || IsSettingsOpen || IsExportConfigOpen || IsExporting || IsResultOpen || IsUpdatePopupOpen;
 
     public bool IsVideoPlayerVisible => HasVideo && !IsAnyOverlayOpen;
 
@@ -299,6 +323,7 @@ public partial class MainViewModel : ObservableObject
         _selectedAudioOption = AudioOptions[0];
         _useGpuAcceleration = Settings.UseGpuAcceleration;
         _shellIntegrationEnabled = Settings.ShellIntegrationEnabled;
+        _autoCheckUpdates = Settings.AutoCheckUpdates;
     }
 
     partial void OnIsInitializingFfmpegChanged(bool value) => OnPropertyChangedAllOverlayStates();
@@ -306,6 +331,26 @@ public partial class MainViewModel : ObservableObject
     partial void OnIsExportConfigOpenChanged(bool value) => OnPropertyChangedAllOverlayStates();
     partial void OnIsExportingChanged(bool value) => OnPropertyChangedAllOverlayStates();
     partial void OnIsResultOpenChanged(bool value) => OnPropertyChangedAllOverlayStates();
+    partial void OnIsUpdatePopupOpenChanged(bool value) => OnPropertyChangedAllOverlayStates();
+    partial void OnIsCheckingUpdatesChanged(bool value) => OnPropertyChanged(nameof(IsNotCheckingUpdates));
+    partial void OnIsDownloadingUpdateChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsNotDownloadingUpdate));
+        OnPropertyChanged(nameof(CanInstallUpdatePackage));
+    }
+
+    partial void OnAvailableUpdateChanged(UpdateInfo? value)
+    {
+        OnPropertyChanged(nameof(UpdateVersionTransitionText));
+        OnPropertyChanged(nameof(CanInstallUpdatePackage));
+    }
+
+    partial void OnAutoCheckUpdatesChanged(bool value)
+    {
+        Settings.AutoCheckUpdates = value;
+        AppSettingsService.Save(Settings);
+    }
+
     partial void OnHasVideoChanged(bool value) => OnPropertyChanged(nameof(IsVideoPlayerVisible));
 
     partial void OnMergeSegmentsChanged(bool value) => OnPropertyChanged(nameof(SeparateSegments));
@@ -405,6 +450,116 @@ public partial class MainViewModel : ObservableObject
         {
             await LoadVideoAsync(startupVideoPath);
         }
+
+        if (Settings.AutoCheckUpdates)
+        {
+            _ = CheckForUpdatesInternalAsync(showPopupOnlyWhenAvailable: true);
+        }
+    }
+
+    [RelayCommand]
+    private async Task CheckForUpdatesAsync()
+    {
+        await CheckForUpdatesInternalAsync(showPopupOnlyWhenAvailable: false);
+    }
+
+    private async Task CheckForUpdatesInternalAsync(bool showPopupOnlyWhenAvailable)
+    {
+        if (IsCheckingUpdates) return;
+        IsCheckingUpdates = true;
+        UpdateStatusText = "Checking GitHub releases...";
+        UpdateErrorText = null;
+
+        try
+        {
+            var info = await _updateService.CheckForUpdatesAsync();
+            if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
+            {
+                UpdateStatusText = $"Could not check updates: {info.ErrorMessage}";
+                return;
+            }
+
+            if (info.IsUpdateAvailable)
+            {
+                AvailableUpdate = info;
+                UpdateStatusText = $"Update available: {UpdateService.FormatVersion(info.LatestVersion)}";
+                IsSettingsOpen = false;
+                IsUpdatePopupOpen = true;
+            }
+            else
+            {
+                UpdateStatusText = info.HasReleases
+                    ? $"You're on the latest version ({UpdateService.FormatVersion(info.CurrentVersion)})"
+                    : $"You're on {UpdateService.FormatVersion(info.CurrentVersion)} (no newer releases on GitHub)";
+
+                if (!showPopupOnlyWhenAvailable)
+                {
+                    AvailableUpdate = info;
+                }
+            }
+        }
+        finally
+        {
+            IsCheckingUpdates = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task DownloadAndInstallUpdateAsync()
+    {
+        if (AvailableUpdate is null || IsDownloadingUpdate) return;
+        if (string.IsNullOrWhiteSpace(AvailableUpdate.AssetDownloadUrl))
+        {
+            OpenUpdateReleasePage();
+            return;
+        }
+
+        IsDownloadingUpdate = true;
+        UpdateDownloadPercent = 0;
+        UpdateDownloadStatus = "Starting update download...";
+        UpdateErrorText = null;
+
+        try
+        {
+            var progress = new Progress<UpdateDownloadProgress>(p =>
+            {
+                UpdateDownloadPercent = p.Percent;
+                UpdateDownloadStatus = p.Status;
+            });
+
+            string packagePath = await _updateService.DownloadUpdateAssetAsync(AvailableUpdate, progress);
+            string appDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            UpdateService.LaunchDownloadedUpdate(packagePath, appDir);
+            Application.Current.Dispatcher.Invoke(() => Application.Current.Shutdown());
+        }
+        catch (Exception ex)
+        {
+            UpdateErrorText = $"Update failed: {ex.Message}";
+            IsDownloadingUpdate = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenUpdateReleasePage()
+    {
+        string url = AvailableUpdate?.ReleasePageUrl ?? UpdateService.ReleasesPageUrl;
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    }
+
+    [RelayCommand]
+    private void DismissUpdatePopup()
+    {
+        if (!IsDownloadingUpdate)
+        {
+            IsUpdatePopupOpen = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenAuthorGitHub()
+    {
+        Process.Start(new ProcessStartInfo(UpdateService.AuthorGitHubUrl) { UseShellExecute = true });
     }
 
     [RelayCommand]

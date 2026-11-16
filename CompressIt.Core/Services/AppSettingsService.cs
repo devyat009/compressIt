@@ -8,6 +8,7 @@ public sealed class AppSettings
     public bool UseGpuAcceleration { get; set; } = true;
     public string? CustomFfmpegDirectory { get; set; }
     public bool ShellIntegrationEnabled { get; set; } = true;
+    public bool AutoCheckUpdates { get; set; } = true;
     public VideoCodec DefaultCodec { get; set; } = VideoCodec.H264;
     public EncodingSpeed DefaultSpeed { get; set; } = EncodingSpeed.Balanced;
     public int DefaultQualityPercent { get; set; } = 85;

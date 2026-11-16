@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>CompressIt-Setup</AssemblyName>
+    <RootNamespace>CompressIt.Installer</RootNamespace>
+    <ApplicationIcon>..\CompressIt\Assets\CompressIt.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CompressIt.Core\CompressIt.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\CompressIt\Assets\CompressIt.ico" Link="Assets\CompressIt.ico" />
+    <EmbeddedResource Include="Payload\CompressIt-Payload.zip"
+                      Condition="Exists('Payload\CompressIt-Payload.zip')"
+                      LogicalName="CompressIt.Payload.zip" />
+  </ItemGroup>
+
+</Project>

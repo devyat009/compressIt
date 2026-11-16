@@ -78,6 +78,41 @@ public class CoreTests
     }
 
     [Fact]
+    public void UpdateService_ParsesGitHubReleaseJsonAndDetectsNewerVersion()
+    {
+        string sampleJson = """
+        {
+          "tag_name": "v1.2.0",
+          "name": "CompressIt v1.2.0",
+          "body": "- Faster AMD AMF encoding\n- Timeline zoom improvements",
+          "html_url": "https://github.com/devyat009/compressIt/releases/tag/v1.2.0",
+          "assets": [
+            {
+              "name": "CompressIt-win-x64-v1.2.0.zip",
+              "size": 70000000,
+              "browser_download_url": "https://github.com/devyat009/compressIt/releases/download/v1.2.0/CompressIt-win-x64-v1.2.0.zip"
+            },
+            {
+              "name": "CompressIt-Setup-v1.2.0.exe",
+              "size": 75000000,
+              "browser_download_url": "https://github.com/devyat009/compressIt/releases/download/v1.2.0/CompressIt-Setup-v1.2.0.exe"
+            }
+          ]
+        }
+        """;
+
+        var update = UpdateService.ParseReleaseJson(sampleJson, new Version(1, 0, 0));
+        Assert.True(update.HasReleases);
+        Assert.True(update.IsUpdateAvailable);
+        Assert.Equal(new Version(1, 2, 0), update.LatestVersion);
+        Assert.Equal("CompressIt-Setup-v1.2.0.exe", update.AssetFileName);
+        Assert.Contains("Faster AMD AMF encoding", update.ReleaseNotes);
+
+        var sameVersion = UpdateService.ParseReleaseJson(sampleJson, new Version(1, 2, 0));
+        Assert.False(sameVersion.IsUpdateAvailable);
+    }
+
+    [Fact]
     public void FfmpegCommandBuilder_PrefersGpuForMatchingVendor_AndFallsBackToCpuWhenDisabled()
     {
         var hw = new HardwareCapabilities
