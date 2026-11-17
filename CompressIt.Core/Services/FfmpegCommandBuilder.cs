@@ -60,8 +60,13 @@ public static class FfmpegCommandBuilder
         return suffixOrder.Split(',').Select(s => $"{prefix}_{s}").ToArray();
     }
 
-    public static string ResolveExtension(ContainerFormat container, VideoCodec codec, string sourcePath)
+    public static string ResolveExtension(ContainerFormat container, VideoCodec codec, string sourcePath, bool enableCompression = true)
     {
+        if (!enableCompression && container == ContainerFormat.Auto)
+        {
+            return Path.GetExtension(sourcePath) is { Length: > 1 } srcExt ? srcExt : ".mp4";
+        }
+
         return container switch
         {
             ContainerFormat.Mp4 => ".mp4",
@@ -335,6 +340,84 @@ public static class FfmpegCommandBuilder
         var ext = Path.GetExtension(outputPath);
         args.AddRange(BuildAudioArgs(options.Audio, ext, source.HasAudio, requiresFilterReencode: true));
 
+        if (ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase) || ext.Equals(".mov", StringComparison.OrdinalIgnoreCase))
+        {
+            args.AddRange(["-movflags", "+faststart"]);
+        }
+
+        args.Add(outputPath);
+        return args;
+    }
+
+    public static List<string> BuildLosslessSingleSegmentArgs(
+        VideoMetadata source,
+        VideoSegment segment,
+        string outputPath,
+        CompressionOptions options)
+    {
+        var args = new List<string> { "-hide_banner", "-y", "-progress", "pipe:1", "-nostats" };
+
+        bool isFullVideo = segment.Start <= TimeSpan.FromMilliseconds(50) &&
+                           segment.End >= source.Duration - TimeSpan.FromMilliseconds(50);
+
+        if (!isFullVideo && segment.Start > TimeSpan.Zero)
+        {
+            args.AddRange(["-ss", FormatHelper.FormatFfmpegTimestamp(segment.Start)]);
+        }
+
+        args.AddRange(["-i", source.FilePath]);
+
+        if (!isFullVideo)
+        {
+            args.AddRange(["-t", FormatHelper.FormatFfmpegTimestamp(segment.Duration)]);
+        }
+
+        args.AddRange(["-c:v", "copy"]);
+        if (!source.HasAudio || options.Audio == AudioMode.Mute)
+        {
+            args.Add("-an");
+        }
+        else
+        {
+            args.AddRange(["-c:a", "copy"]);
+        }
+
+        args.AddRange(["-avoid_negative_ts", "make_zero"]);
+
+        var ext = Path.GetExtension(outputPath);
+        if (ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase) || ext.Equals(".mov", StringComparison.OrdinalIgnoreCase))
+        {
+            args.AddRange(["-movflags", "+faststart"]);
+        }
+
+        args.Add(outputPath);
+        return args;
+    }
+
+    public static List<string> BuildLosslessConcatArgs(
+        string concatListPath,
+        string outputPath,
+        CompressionOptions options,
+        bool hasAudio)
+    {
+        var args = new List<string>
+        {
+            "-hide_banner", "-y", "-progress", "pipe:1", "-nostats",
+            "-f", "concat", "-safe", "0",
+            "-i", concatListPath,
+            "-c:v", "copy"
+        };
+
+        if (!hasAudio || options.Audio == AudioMode.Mute)
+        {
+            args.Add("-an");
+        }
+        else
+        {
+            args.AddRange(["-c:a", "copy"]);
+        }
+
+        var ext = Path.GetExtension(outputPath);
         if (ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase) || ext.Equals(".mov", StringComparison.OrdinalIgnoreCase))
         {
             args.AddRange(["-movflags", "+faststart"]);

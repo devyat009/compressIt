@@ -52,6 +52,7 @@ public enum ContainerFormat
 
 public sealed class CompressionOptions
 {
+    public bool EnableCompression { get; set; } = true;
     public VideoCodec Codec { get; set; } = VideoCodec.H264;
     public EncodingSpeed Speed { get; set; } = EncodingSpeed.Balanced;
     public int? TargetFps { get; set; } = null; // null = Original
@@ -62,6 +63,7 @@ public sealed class CompressionOptions
 
     public CompressionOptions Clone() => new()
     {
+        EnableCompression = EnableCompression,
         Codec = Codec,
         Speed = Speed,
         TargetFps = TargetFps,

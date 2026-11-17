@@ -111,6 +111,7 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnTimelineZoomLevelChanged(double value) => OnPropertyChanged(nameof(TimelineZoomLabel));
 
+    [ObservableProperty] private bool _enableCompression = true;
     [ObservableProperty] private CodecOption _selectedCodecOption;
     [ObservableProperty] private SpeedOption _selectedSpeedOption;
     [ObservableProperty] private FpsOption _selectedFpsOption;
@@ -203,10 +204,25 @@ public partial class MainViewModel : ObservableObject
         _ => new SolidColorBrush(Color.FromRgb(74, 222, 128))
     };
 
+    public string CompressionModeSubtitle => EnableCompression
+        ? "Re-encode using GPU / CPU settings"
+        : "Lossless cut only (instant stream copy)";
+
+    public string ExportPrimaryButtonText => EnableCompression
+        ? "Export & Compress"
+        : "Export Lossless Cut";
+
+    public double CompressionControlsOpacity => EnableCompression ? 1.0 : 0.45;
+
     public string ActiveEncoderHint
     {
         get
         {
+            if (!EnableCompression)
+            {
+                return "Lossless Mode: Stream Copy (-c copy)";
+            }
+
             var resolved = FfmpegCommandBuilder.ResolveEncoder(
                 SelectedCodecOption.Codec,
                 UseGpuAcceleration,
@@ -273,6 +289,11 @@ public partial class MainViewModel : ObservableObject
     {
         get
         {
+            if (!EnableCompression)
+            {
+                return "Lossless Cut Only • Stream Copy (-c copy) • Original Quality";
+            }
+
             var resolved = FfmpegCommandBuilder.ResolveEncoder(SelectedCodecOption.Codec, UseGpuAcceleration, Hardware);
             string fpsLabel = SelectedFpsOption.Fps is int fps ? $"{fps} fps" : "Original FPS";
             string hwMode = resolved.IsGpu ? "GPU" : "CPU";
@@ -349,6 +370,31 @@ public partial class MainViewModel : ObservableObject
     {
         Settings.AutoCheckUpdates = value;
         AppSettingsService.Save(Settings);
+    }
+
+    partial void OnEnableCompressionChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CompressionModeSubtitle));
+        OnPropertyChanged(nameof(ExportPrimaryButtonText));
+        OnPropertyChanged(nameof(CompressionControlsOpacity));
+        OnPropertyChanged(nameof(ActiveEncoderHint));
+        OnPropertyChanged(nameof(ExportSummaryText));
+
+        if (CurrentVideo is not null)
+        {
+            string baseName = Path.GetFileNameWithoutExtension(CurrentVideo.FileName);
+            string compDefault = $"{baseName}_compressed";
+            string cutDefault = $"{baseName}_cut";
+
+            if (!value && ExportFileName.Equals(compDefault, StringComparison.OrdinalIgnoreCase))
+            {
+                ExportFileName = cutDefault;
+            }
+            else if (value && ExportFileName.Equals(cutDefault, StringComparison.OrdinalIgnoreCase))
+            {
+                ExportFileName = compDefault;
+            }
+        }
     }
 
     partial void OnHasVideoChanged(bool value) => OnPropertyChanged(nameof(IsVideoPlayerVisible));
@@ -697,7 +743,8 @@ public partial class MainViewModel : ObservableObject
             SelectedSegmentId = initialSegments.FirstOrDefault()?.Id;
 
             ExportOutputDirectory = Path.GetDirectoryName(meta.FilePath) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
-            ExportFileName = $"{Path.GetFileNameWithoutExtension(meta.FileName)}_compressed";
+            string suffix = EnableCompression ? "_compressed" : "_cut";
+            ExportFileName = $"{Path.GetFileNameWithoutExtension(meta.FileName)}{suffix}";
 
             OnPropertyChanged(nameof(SourceVideoSpecsText));
             VideoReadyToLoadInPlayer?.Invoke(filePath);
@@ -912,6 +959,7 @@ public partial class MainViewModel : ObservableObject
 
         var options = new CompressionOptions
         {
+            EnableCompression = EnableCompression,
             Codec = SelectedCodecOption.Codec,
             Speed = SelectedSpeedOption.Speed,
             TargetFps = SelectedFpsOption.Fps,
@@ -928,7 +976,7 @@ public partial class MainViewModel : ObservableObject
                 ? (Path.GetDirectoryName(CurrentVideo.FilePath) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyVideos))
                 : ExportOutputDirectory,
             OutputBaseName = string.IsNullOrWhiteSpace(ExportFileName)
-                ? $"{Path.GetFileNameWithoutExtension(CurrentVideo.FileName)}_compressed"
+                ? $"{Path.GetFileNameWithoutExtension(CurrentVideo.FileName)}{(EnableCompression ? "_compressed" : "_cut")}"
                 : ExportFileName.Trim(),
             Container = SelectedContainerOption.Format,
             MergeSegments = MergeSegments,

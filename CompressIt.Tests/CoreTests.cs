@@ -113,6 +113,43 @@ public class CoreTests
     }
 
     [Fact]
+    public void FfmpegCommandBuilder_LosslessCutMode_UsesStreamCopyAndPreservesSourceExtension()
+    {
+        var meta = new VideoMetadata
+        {
+            FilePath = @"C:\videos\clip.mkv",
+            FileName = "clip.mkv",
+            FileSizeBytes = 50_000_000,
+            Duration = TimeSpan.FromSeconds(30),
+            Width = 1920,
+            Height = 1080,
+            Fps = 60,
+            HasAudio = true
+        };
+        var seg = new VideoSegment
+        {
+            Index = 1,
+            Start = TimeSpan.FromSeconds(5),
+            End = TimeSpan.FromSeconds(20),
+            IsIncluded = true
+        };
+        var opts = new CompressionOptions { EnableCompression = false, Audio = AudioMode.Aac192 };
+
+        string ext = FfmpegCommandBuilder.ResolveExtension(ContainerFormat.Auto, VideoCodec.H264, meta.FilePath, enableCompression: false);
+        Assert.Equal(".mkv", ext);
+
+        var singleArgs = FfmpegCommandBuilder.BuildLosslessSingleSegmentArgs(meta, seg, @"C:\videos\clip_cut.mkv", opts);
+        Assert.Contains("-c:v", singleArgs);
+        Assert.Contains("copy", singleArgs);
+        Assert.DoesNotContain("-vf", singleArgs);
+        Assert.Contains("-avoid_negative_ts", singleArgs);
+
+        var concatArgs = FfmpegCommandBuilder.BuildLosslessConcatArgs(@"C:\temp\concat.txt", @"C:\videos\clip_cut.mkv", opts, hasAudio: true);
+        Assert.Contains("concat", concatArgs);
+        Assert.Contains("copy", concatArgs);
+    }
+
+    [Fact]
     public void FfmpegCommandBuilder_PrefersGpuForMatchingVendor_AndFallsBackToCpuWhenDisabled()
     {
         var hw = new HardwareCapabilities

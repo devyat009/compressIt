@@ -199,15 +199,141 @@ public sealed class VideoProcessingService
         }
 
         Directory.CreateDirectory(request.OutputDirectory);
-        string ext = FfmpegCommandBuilder.ResolveExtension(request.Container, request.Options.Codec, request.SourceVideo.FilePath);
-        var resolvedEncoder = FfmpegCommandBuilder.ResolveEncoder(request.Options.Codec, request.UseGpu, request.Hardware);
+        bool compress = request.Options.EnableCompression;
+        string ext = FfmpegCommandBuilder.ResolveExtension(request.Container, request.Options.Codec, request.SourceVideo.FilePath, compress);
+        var resolvedEncoder = compress
+            ? FfmpegCommandBuilder.ResolveEncoder(request.Options.Codec, request.UseGpu, request.Hardware)
+            : new ResolvedEncoder("Lossless (Stream Copy)", false, null);
 
         var outputFiles = new List<string>();
         var totalDuration = SegmentManager.GetTotalIncludedDuration(included);
+        string? losslessTempDir = null;
 
         try
         {
-            if (request.MergeSegments || included.Count == 1)
+            if (!compress)
+            {
+                if (included.Count == 1)
+                {
+                    string targetPath = GetUniqueFilePath(Path.Combine(request.OutputDirectory, $"{request.OutputBaseName}{ext}"));
+                    outputFiles.Add(targetPath);
+
+                    var args = FfmpegCommandBuilder.BuildLosslessSingleSegmentArgs(
+                        request.SourceVideo,
+                        included[0],
+                        targetPath,
+                        request.Options);
+
+                    await RunFfmpegWithProgressAsync(
+                        ffmpegPath,
+                        args,
+                        included[0].Duration,
+                        progress,
+                        statusPrefix: "Cutting losslessly (stream copy)...",
+                        basePercent: 0,
+                        percentSpan: 100,
+                        segmentIndex: 1,
+                        totalSegments: 1,
+                        ct);
+                }
+                else if (request.MergeSegments)
+                {
+                    losslessTempDir = Path.Combine(Path.GetTempPath(), "CompressIt_Lossless", Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(losslessTempDir);
+
+                    var tempParts = new List<string>(included.Count);
+                    double completedSec = 0;
+                    double totalSec = Math.Max(0.1, totalDuration.TotalSeconds);
+
+                    for (int i = 0; i < included.Count; i++)
+                    {
+                        var seg = included[i];
+                        string partPath = Path.Combine(losslessTempDir, $"part_{i:D3}{ext}");
+                        tempParts.Add(partPath);
+
+                        var segArgs = FfmpegCommandBuilder.BuildLosslessSingleSegmentArgs(
+                            request.SourceVideo,
+                            seg,
+                            partPath,
+                            request.Options);
+
+                        double segSpan = seg.Duration.TotalSeconds / totalSec * 80.0;
+                        double basePct = completedSec / totalSec * 80.0;
+
+                        await RunFfmpegWithProgressAsync(
+                            ffmpegPath,
+                            segArgs,
+                            seg.Duration,
+                            progress,
+                            statusPrefix: $"Cutting segment {i + 1} of {included.Count} (lossless)...",
+                            basePercent: basePct,
+                            percentSpan: segSpan,
+                            segmentIndex: i + 1,
+                            totalSegments: included.Count,
+                            ct);
+
+                        completedSec += seg.Duration.TotalSeconds;
+                    }
+
+                    string concatListPath = Path.Combine(losslessTempDir, "concat.txt");
+                    var concatLines = tempParts.Select(p => $"file '{p.Replace("'", "'\\''")}'");
+                    await File.WriteAllLinesAsync(concatListPath, concatLines, ct);
+
+                    string targetPath = GetUniqueFilePath(Path.Combine(request.OutputDirectory, $"{request.OutputBaseName}{ext}"));
+                    outputFiles.Add(targetPath);
+
+                    bool hasAudio = request.SourceVideo.HasAudio && request.Options.Audio != AudioMode.Mute;
+                    var concatArgs = FfmpegCommandBuilder.BuildLosslessConcatArgs(concatListPath, targetPath, request.Options, hasAudio);
+
+                    await RunFfmpegWithProgressAsync(
+                        ffmpegPath,
+                        concatArgs,
+                        totalDuration,
+                        progress,
+                        statusPrefix: $"Merging {included.Count} lossless segments...",
+                        basePercent: 80,
+                        percentSpan: 20,
+                        segmentIndex: included.Count,
+                        totalSegments: included.Count,
+                        ct);
+                }
+                else
+                {
+                    double completedDurationSec = 0;
+                    double totalDurationSec = Math.Max(0.1, totalDuration.TotalSeconds);
+
+                    for (int i = 0; i < included.Count; i++)
+                    {
+                        var seg = included[i];
+                        string targetPath = GetUniqueFilePath(Path.Combine(request.OutputDirectory, $"{request.OutputBaseName}_part{i + 1}{ext}"));
+                        outputFiles.Add(targetPath);
+
+                        var args = FfmpegCommandBuilder.BuildLosslessSingleSegmentArgs(
+                            request.SourceVideo,
+                            seg,
+                            targetPath,
+                            request.Options);
+
+                        double segSpan = seg.Duration.TotalSeconds / totalDurationSec * 100.0;
+                        double basePct = completedDurationSec / totalDurationSec * 100.0;
+
+                        await RunFfmpegWithProgressAsync(
+                            ffmpegPath,
+                            args,
+                            seg.Duration,
+                            progress,
+                            statusPrefix: $"Cutting segment {i + 1} of {included.Count} (lossless)...",
+                            basePercent: basePct,
+                            percentSpan: segSpan,
+                            segmentIndex: i + 1,
+                            totalSegments: included.Count,
+                            ct);
+
+                        completedDurationSec += seg.Duration.TotalSeconds;
+                    }
+                }
+            }
+            else if (request.MergeSegments || included.Count == 1)
             {
                 string targetPath = GetUniqueFilePath(Path.Combine(request.OutputDirectory, $"{request.OutputBaseName}{ext}"));
                 outputFiles.Add(targetPath);
@@ -308,6 +434,13 @@ public sealed class VideoProcessingService
                 ErrorMessage = ex.Message,
                 OriginalSizeBytes = request.SourceVideo.FileSizeBytes
             };
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(losslessTempDir))
+            {
+                try { Directory.Delete(losslessTempDir, recursive: true); } catch { }
+            }
         }
     }
 

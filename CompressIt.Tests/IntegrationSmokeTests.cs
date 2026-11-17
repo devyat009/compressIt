@@ -141,6 +141,30 @@ public class IntegrationSmokeTests
             Assert.True(sepResult.Success, sepResult.ErrorMessage);
             Assert.Equal(2, sepResult.OutputFiles.Count);
             Assert.All(sepResult.OutputFiles, f => Assert.True(File.Exists(f)));
+
+            // 3) Export LOSSLESS CUT (Merge segments with compression disabled)
+            var losslessOutDir = Path.Combine(tempDir, "out_lossless");
+            var losslessReq = new ExportRequest
+            {
+                SourceVideo = meta,
+                OutputDirectory = losslessOutDir,
+                OutputBaseName = "sample_lossless_cut",
+                MergeSegments = true,
+                Segments = segs,
+                Options = new CompressionOptions
+                {
+                    EnableCompression = false,
+                    Audio = AudioMode.Copy
+                },
+                UseGpu = true,
+                Hardware = hw
+            };
+
+            var losslessResult = await processor.ExportAsync(losslessReq, ffmpegPath, exportProgress);
+            Assert.True(losslessResult.Success, losslessResult.ErrorMessage);
+            Assert.Equal("Lossless (Stream Copy)", losslessResult.UsedEncoder);
+            Assert.Single(losslessResult.OutputFiles);
+            Assert.True(File.Exists(losslessResult.OutputFiles[0]));
         }
         finally
         {
