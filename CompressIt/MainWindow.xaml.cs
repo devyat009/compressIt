@@ -115,7 +115,12 @@ public partial class MainWindow : FluentWindow
         {
             await _libVlcInitTask;
         }
-        if (_libVlc is null || _mediaPlayer is null) return;
+
+        if (_libVlc is null || _mediaPlayer is null)
+        {
+            _vm.IsLoadingVideo = false;
+            return;
+        }
 
         _mediaPlayer.Stop();
         _currentMedia?.Dispose();
@@ -124,21 +129,39 @@ public partial class MainWindow : FluentWindow
         _mediaPlayer.Mute = _vm.IsMuted;
         _mediaPlayer.Volume = _vm.Volume;
 
-        _mediaPlayer.Play();
-        // Pause shortly after first frame renders so user gets an immediate preview frame.
-        _ = Task.Delay(250).ContinueWith(_ =>
+        var firstFrameTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnVout(object? s, MediaPlayerVoutEventArgs e)
         {
-            Dispatcher.BeginInvoke(() =>
+            if (e.Count > 0) firstFrameTcs.TrySetResult(true);
+        }
+
+        void OnEncounteredError(object? s, EventArgs e) => firstFrameTcs.TrySetResult(false);
+
+        _mediaPlayer.Vout += OnVout;
+        _mediaPlayer.EncounteredError += OnEncounteredError;
+
+        try
+        {
+            _mediaPlayer.Play();
+            await Task.WhenAny(firstFrameTcs.Task, Task.Delay(3000));
+            // Give LibVLC a brief beat to render the first video frame before pausing & revealing
+            await Task.Delay(180);
+
+            if (_mediaPlayer.IsPlaying)
             {
-                if (_mediaPlayer is not null && _mediaPlayer.IsPlaying)
-                {
-                    _mediaPlayer.SetPause(true);
-                    _mediaPlayer.Time = 0;
-                    _vm.PlayheadPosition = TimeSpan.Zero;
-                    _vm.IsPlaying = false;
-                }
-            });
-        });
+                _mediaPlayer.SetPause(true);
+                _mediaPlayer.Time = 0;
+                _vm.PlayheadPosition = TimeSpan.Zero;
+                _vm.IsPlaying = false;
+            }
+        }
+        finally
+        {
+            _mediaPlayer.Vout -= OnVout;
+            _mediaPlayer.EncounteredError -= OnEncounteredError;
+            _vm.IsLoadingVideo = false;
+        }
     }
 
     private void SeekPlayer(TimeSpan target)

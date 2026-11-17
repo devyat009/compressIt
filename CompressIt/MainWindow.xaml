@@ -347,7 +347,7 @@
                         <!-- Empty State Dropzone -->
                         <StackPanel VerticalAlignment="Center"
                                     HorizontalAlignment="Center"
-                                    Visibility="{Binding HasVideo, Converter={StaticResource InverseBoolToVis}}">
+                                    Visibility="{Binding ShowEmptyDropzone, Converter={StaticResource BoolToVis}}">
                             <Border Width="72" Height="72" CornerRadius="36" Background="#164ADE80" Margin="0,0,0,16">
                                 <ui:SymbolIcon Symbol="VideoClip24" FontSize="34" Foreground="#4ADE80" />
                             </Border>
@@ -371,9 +371,50 @@
                             </ui:Button>
                         </StackPanel>
 
-                        <!-- LibVLC VideoView (collapsed automatically while overlays are open) -->
+                        <!-- Loading Video Animation (prevents white HWND flash while LibVLC buffers first frame) -->
+                        <StackPanel VerticalAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    Visibility="{Binding IsLoadingVideo, Converter={StaticResource BoolToVis}}">
+                            <ui:ProgressRing IsIndeterminate="True"
+                                            Width="48"
+                                            Height="48"
+                                            Margin="0,0,0,16" />
+                            <TextBlock Text="Loading video..."
+                                      FontSize="16"
+                                      FontWeight="SemiBold"
+                                      HorizontalAlignment="Center" />
+                            <TextBlock Text="{Binding LoadingVideoName}"
+                                      FontSize="12"
+                                      Foreground="#CBD5E1"
+                                      MaxWidth="360"
+                                      TextTrimming="CharacterEllipsis"
+                                      HorizontalAlignment="Center"
+                                      Margin="0,4,0,2" />
+                            <TextBlock Text="{Binding LoadingVideoStatus}"
+                                      FontSize="11"
+                                      Foreground="#94A3B8"
+                                      HorizontalAlignment="Center" />
+                        </StackPanel>
+
+                        <!-- LibVLC VideoView (1x1 while loading first frame to prevent white HWND flash, collapsed when overlays are open) -->
                         <vlc:VideoView x:Name="MediaVideoView"
-                                      Visibility="{Binding IsVideoPlayerVisible, Converter={StaticResource BoolToVis}}" />
+                                      Background="#FF090D14"
+                                      Visibility="{Binding IsVideoPlayerVisible, Converter={StaticResource BoolToVis}}">
+                            <vlc:VideoView.Style>
+                                <Style TargetType="vlc:VideoView">
+                                    <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                    <Setter Property="VerticalAlignment" Value="Stretch" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsLoadingVideo}" Value="True">
+                                            <Setter Property="Width" Value="1" />
+                                            <Setter Property="Height" Value="1" />
+                                            <Setter Property="HorizontalAlignment" Value="Left" />
+                                            <Setter Property="VerticalAlignment" Value="Top" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </vlc:VideoView.Style>
+                        </vlc:VideoView>
                     </Grid>
                 </Border>
 
@@ -844,8 +885,9 @@
         <Grid Grid.Row="1" Grid.RowSpan="2"
               Background="#CC090D14"
               Visibility="{Binding IsSettingsOpen, Converter={StaticResource BoolToVis}}">
-            <Border Width="540"
-                    MaxHeight="660"
+            <Border Width="594"
+                    MaxHeight="760"
+                    Margin="16"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center"
                     CornerRadius="16"

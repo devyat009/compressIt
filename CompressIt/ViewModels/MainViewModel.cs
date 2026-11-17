@@ -136,6 +136,9 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private CompressionResult? _lastResult;
     [ObservableProperty] private string? _errorBannerText;
+    [ObservableProperty] private bool _isLoadingVideo;
+    [ObservableProperty] private string _loadingVideoName = string.Empty;
+    [ObservableProperty] private string _loadingVideoStatus = "Reading video metadata...";
 
     [ObservableProperty] private bool _autoCheckUpdates = true;
     [ObservableProperty] private bool _isCheckingUpdates;
@@ -175,6 +178,8 @@ public partial class MainViewModel : ObservableObject
         IsInitializingFfmpeg || IsSettingsOpen || IsExportConfigOpen || IsExporting || IsResultOpen || IsUpdatePopupOpen;
 
     public bool IsVideoPlayerVisible => HasVideo && !IsAnyOverlayOpen;
+
+    public bool ShowEmptyDropzone => !HasVideo && !IsLoadingVideo;
 
     public bool SeparateSegments
     {
@@ -397,7 +402,17 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    partial void OnHasVideoChanged(bool value) => OnPropertyChanged(nameof(IsVideoPlayerVisible));
+    partial void OnHasVideoChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsVideoPlayerVisible));
+        OnPropertyChanged(nameof(ShowEmptyDropzone));
+    }
+
+    partial void OnIsLoadingVideoChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsVideoPlayerVisible));
+        OnPropertyChanged(nameof(ShowEmptyDropzone));
+    }
 
     partial void OnMergeSegmentsChanged(bool value) => OnPropertyChanged(nameof(SeparateSegments));
 
@@ -720,12 +735,19 @@ public partial class MainViewModel : ObservableObject
         ErrorBannerText = null;
         IsResultOpen = false;
         IsExportConfigOpen = false;
+        LoadingVideoName = Path.GetFileName(filePath);
+        LoadingVideoStatus = "Reading video metadata...";
+        IsLoadingVideo = true;
 
         var (ffmpegPath, ffprobePath) = FFmpegDownloadService.ResolvePaths(Settings.CustomFfmpegDirectory);
         if (!File.Exists(ffmpegPath) || !File.Exists(ffprobePath))
         {
             await EnsureFfmpegAndDetectHardwareAsync(forceRedownload: false);
-            if (IsInitializingFfmpeg) return;
+            if (IsInitializingFfmpeg)
+            {
+                IsLoadingVideo = false;
+                return;
+            }
             (ffmpegPath, ffprobePath) = FFmpegDownloadService.ResolvePaths(Settings.CustomFfmpegDirectory);
         }
 
@@ -747,12 +769,14 @@ public partial class MainViewModel : ObservableObject
             ExportFileName = $"{Path.GetFileNameWithoutExtension(meta.FileName)}{suffix}";
 
             OnPropertyChanged(nameof(SourceVideoSpecsText));
+            LoadingVideoStatus = "Initializing video preview...";
             VideoReadyToLoadInPlayer?.Invoke(filePath);
 
             _ = ExtractThumbnailsInBackgroundAsync(ffmpegPath, meta);
         }
         catch (Exception ex)
         {
+            IsLoadingVideo = false;
             ErrorBannerText = $"Could not open video: {ex.Message}";
         }
     }
