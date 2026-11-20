@@ -52,3 +52,12 @@ public sealed class MuteSymbolConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
         Binding.DoNothing;
 }
+
+public sealed class SoundBellSymbolConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+        value is true ? SymbolRegular.Alert24 : SymbolRegular.AlertOff24;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        Binding.DoNothing;
+}

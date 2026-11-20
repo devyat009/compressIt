@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CompressIt.Core.Models;
 using CompressIt.Core.Services;
+using CompressIt.Services;
 
 namespace CompressIt.ViewModels;
 
@@ -141,6 +142,11 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _loadingVideoStatus = "Reading video metadata...";
 
     [ObservableProperty] private bool _autoCheckUpdates = true;
+    [ObservableProperty] private bool _playCompletionSound = true;
+
+    public string CompletionSoundToolTip => PlayCompletionSound
+        ? "Completion sound: On (click to mute)"
+        : "Completion sound: Off (click to enable)";
     [ObservableProperty] private bool _isCheckingUpdates;
     [ObservableProperty] private string _updateStatusText = "Not checked yet";
     [ObservableProperty] private bool _isUpdatePopupOpen;
@@ -350,6 +356,7 @@ public partial class MainViewModel : ObservableObject
         _useGpuAcceleration = Settings.UseGpuAcceleration;
         _shellIntegrationEnabled = Settings.ShellIntegrationEnabled;
         _autoCheckUpdates = Settings.AutoCheckUpdates;
+        _playCompletionSound = Settings.PlayCompletionSound;
     }
 
     partial void OnIsInitializingFfmpegChanged(bool value) => OnPropertyChangedAllOverlayStates();
@@ -376,6 +383,16 @@ public partial class MainViewModel : ObservableObject
         Settings.AutoCheckUpdates = value;
         AppSettingsService.Save(Settings);
     }
+
+    partial void OnPlayCompletionSoundChanged(bool value)
+    {
+        Settings.PlayCompletionSound = value;
+        AppSettingsService.Save(Settings);
+        OnPropertyChanged(nameof(CompletionSoundToolTip));
+    }
+
+    [RelayCommand]
+    private void ToggleCompletionSound() => PlayCompletionSound = !PlayCompletionSound;
 
     partial void OnEnableCompressionChanged(bool value)
     {
@@ -1038,6 +1055,11 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(ResultSavedBadgeText));
         OnPropertyChanged(nameof(ResultDetailText));
         IsResultOpen = true;
+
+        if (PlayCompletionSound)
+        {
+            CompletionSoundService.PlaySuccessChime();
+        }
     }
 
     [RelayCommand]
