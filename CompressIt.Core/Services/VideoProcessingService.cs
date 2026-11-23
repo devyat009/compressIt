@@ -180,6 +180,54 @@ public sealed class VideoProcessingService
         return results.Where(p => !string.IsNullOrEmpty(p)).ToList();
     }
 
+    public async Task<string?> ExtractSingleThumbnailAsync(
+        string ffmpegPath,
+        string videoPath,
+        TimeSpan duration,
+        string outputFile,
+        CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
+        var ts = duration > TimeSpan.FromSeconds(1)
+            ? TimeSpan.FromSeconds(Math.Clamp(duration.TotalSeconds * 0.15, 0, Math.Max(0, duration.TotalSeconds - 0.1)))
+            : TimeSpan.Zero;
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("-hide_banner");
+        psi.ArgumentList.Add("-loglevel");
+        psi.ArgumentList.Add("error");
+        psi.ArgumentList.Add("-y");
+        psi.ArgumentList.Add("-ss");
+        psi.ArgumentList.Add(FormatHelper.FormatFfmpegTimestamp(ts));
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(videoPath);
+        psi.ArgumentList.Add("-frames:v");
+        psi.ArgumentList.Add("1");
+        psi.ArgumentList.Add("-vf");
+        psi.ArgumentList.Add("scale=320:-2");
+        psi.ArgumentList.Add("-q:v");
+        psi.ArgumentList.Add("4");
+        psi.ArgumentList.Add(outputFile);
+
+        using var proc = Process.Start(psi);
+        if (proc is null) return null;
+
+        using var reg = ct.Register(() =>
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { }
+        });
+
+        await proc.WaitForExitAsync(ct);
+        return proc.ExitCode == 0 && File.Exists(outputFile) ? outputFile : null;
+    }
+
     public async Task<CompressionResult> ExportAsync(
         ExportRequest request,
         string ffmpegPath,
@@ -414,6 +462,47 @@ public sealed class VideoProcessingService
                 UsedEncoder = resolvedEncoder.EncoderName
             };
         }
+        catch (FfmpegStalledException ex)
+        {
+            CleanupPartialFiles(outputFiles);
+            if (!string.IsNullOrEmpty(losslessTempDir))
+            {
+                try { Directory.Delete(losslessTempDir, recursive: true); } catch { }
+                losslessTempDir = null;
+            }
+
+            // If GPU encoding stalled (e.g. driver/session hang with 0% GPU), automatically retry on CPU once.
+            if (request.UseGpu && request.Options.EnableCompression && !ct.IsCancellationRequested)
+            {
+                progress.Report(new ExportProgress
+                {
+                    Percent = 0,
+                    StatusText = "GPU stalled — retrying with CPU...",
+                    SpeedText = "GPU stalled -> CPU"
+                });
+
+                var cpuFallbackRequest = new ExportRequest
+                {
+                    SourceVideo = request.SourceVideo,
+                    OutputDirectory = request.OutputDirectory,
+                    OutputBaseName = request.OutputBaseName,
+                    Container = request.Container,
+                    MergeSegments = request.MergeSegments,
+                    Segments = request.Segments,
+                    Options = request.Options,
+                    UseGpu = false,
+                    Hardware = request.Hardware
+                };
+                return await ExportAsync(cpuFallbackRequest, ffmpegPath, progress, ct);
+            }
+
+            return new CompressionResult
+            {
+                Success = false,
+                ErrorMessage = ex.Message,
+                OriginalSizeBytes = request.SourceVideo.FileSizeBytes
+            };
+        }
         catch (OperationCanceledException)
         {
             CleanupPartialFiles(outputFiles);
@@ -444,6 +533,8 @@ public sealed class VideoProcessingService
         }
     }
 
+    private sealed class FfmpegStalledException(string message) : Exception(message);
+
     private static async Task RunFfmpegWithProgressAsync(
         string ffmpegPath,
         IReadOnlyList<string> args,
@@ -467,8 +558,12 @@ public sealed class VideoProcessingService
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to launch ffmpeg.");
+        using var stallCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bool stalled = false;
+        long lastProgressTick = Environment.TickCount64;
+        const long stallTimeoutMs = 25_000;
 
-        using var reg = ct.Register(() =>
+        using var reg = stallCts.Token.Register(() =>
         {
             try
             {
@@ -477,54 +572,113 @@ public sealed class VideoProcessingService
             catch { }
         });
 
+        var watchdogTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!stallCts.Token.IsCancellationRequested && !process.HasExited)
+                {
+                    await Task.Delay(2000, stallCts.Token);
+                    long elapsed = Environment.TickCount64 - Interlocked.Read(ref lastProgressTick);
+                    if (elapsed > stallTimeoutMs && !process.HasExited)
+                    {
+                        stalled = true;
+                        stallCts.Cancel();
+                        break;
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, CancellationToken.None);
+
         var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
 
         double expectedUs = Math.Max(1.0, expectedDuration.TotalMicroseconds);
         string currentSpeed = "";
         double latestLocalFraction = 0;
+        long lastReportedUs = -1;
+        long lastFrame = -1;
 
-        while (await process.StandardOutput.ReadLineAsync(ct) is { } line)
+        try
         {
-
-            int eq = line.IndexOf('=');
-            if (eq <= 0) continue;
-
-            var key = line[..eq].Trim();
-            var val = line[(eq + 1)..].Trim();
-
-            if (key == "speed")
+            while (await process.StandardOutput.ReadLineAsync(stallCts.Token) is { } line)
             {
-                currentSpeed = val;
-            }
-            else if (key == "out_time_us" && long.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out long us))
-            {
-                latestLocalFraction = Math.Clamp(us / expectedUs, 0, 1);
-            }
-            else if (key == "out_time_ms" && long.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out long msUs))
-            {
-                // Note: ffmpeg's out_time_ms is actually microseconds in many builds
-                latestLocalFraction = Math.Clamp(msUs / expectedUs, 0, 1);
-            }
-            else if (key == "progress")
-            {
-                if (val == "end") latestLocalFraction = 1.0;
+                int eq = line.IndexOf('=');
+                if (eq <= 0) continue;
 
-                double overallPct = Math.Clamp(basePercent + latestLocalFraction * percentSpan, 0, 100);
-                string eta = EstimateEta(expectedDuration, latestLocalFraction, currentSpeed);
+                var key = line[..eq].Trim();
+                var val = line[(eq + 1)..].Trim();
 
-                progress.Report(new ExportProgress
+                if (key == "speed")
                 {
-                    Percent = overallPct,
-                    StatusText = statusPrefix,
-                    SpeedText = string.IsNullOrWhiteSpace(currentSpeed) ? "" : $"Speed: {currentSpeed}",
-                    EtaText = eta,
-                    CurrentSegmentIndex = segmentIndex,
-                    TotalSegments = totalSegments
-                });
+                    currentSpeed = val;
+                }
+                else if (key == "frame" && long.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out long frame))
+                {
+                    if (frame > lastFrame)
+                    {
+                        lastFrame = frame;
+                        Interlocked.Exchange(ref lastProgressTick, Environment.TickCount64);
+                    }
+                }
+                else if (key == "out_time_us" && long.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out long us))
+                {
+                    if (us > lastReportedUs)
+                    {
+                        lastReportedUs = us;
+                        Interlocked.Exchange(ref lastProgressTick, Environment.TickCount64);
+                    }
+                    latestLocalFraction = Math.Clamp(us / expectedUs, 0, 1);
+                }
+                else if (key == "out_time_ms" && long.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out long msUs))
+                {
+                    if (msUs > lastReportedUs)
+                    {
+                        lastReportedUs = msUs;
+                        Interlocked.Exchange(ref lastProgressTick, Environment.TickCount64);
+                    }
+                    latestLocalFraction = Math.Clamp(msUs / expectedUs, 0, 1);
+                }
+                else if (key == "progress")
+                {
+                    if (val == "end")
+                    {
+                        latestLocalFraction = 1.0;
+                        Interlocked.Exchange(ref lastProgressTick, Environment.TickCount64);
+                    }
+
+                    double overallPct = Math.Clamp(basePercent + latestLocalFraction * percentSpan, 0, 100);
+                    string eta = EstimateEta(expectedDuration, latestLocalFraction, currentSpeed);
+
+                    progress.Report(new ExportProgress
+                    {
+                        Percent = overallPct,
+                        StatusText = statusPrefix,
+                        SpeedText = string.IsNullOrWhiteSpace(currentSpeed) ? "" : $"Speed: {currentSpeed}",
+                        EtaText = eta,
+                        CurrentSegmentIndex = segmentIndex,
+                        TotalSegments = totalSegments
+                    });
+                }
             }
+
+            await process.WaitForExitAsync(stallCts.Token);
+        }
+        catch (OperationCanceledException) when (stalled && !ct.IsCancellationRequested)
+        {
+            throw new FfmpegStalledException("FFmpeg stalled (no encoding progress for 25s).");
+        }
+        finally
+        {
+            if (!stallCts.IsCancellationRequested) stallCts.Cancel();
+            try { await watchdogTask; } catch { }
         }
 
-        await process.WaitForExitAsync(ct);
+        if (stalled && !ct.IsCancellationRequested)
+        {
+            throw new FfmpegStalledException("FFmpeg stalled (no encoding progress for 25s).");
+        }
+
         string stderr = await stderrTask;
 
         if (process.ExitCode != 0)

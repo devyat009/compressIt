@@ -243,7 +243,7 @@ public static class FfmpegCommandBuilder
         CompressionOptions options,
         ResolvedEncoder encoder)
     {
-        var args = new List<string> { "-hide_banner", "-y", "-progress", "pipe:1", "-nostats" };
+        var args = new List<string> { "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats" };
 
         bool isFullVideo = segment.Start <= TimeSpan.FromMilliseconds(50) &&
                            segment.End >= source.Duration - TimeSpan.FromMilliseconds(50);
@@ -292,7 +292,7 @@ public static class FfmpegCommandBuilder
             return BuildSingleSegmentArgs(source, segments[0], outputPath, options, encoder);
         }
 
-        var args = new List<string> { "-hide_banner", "-y", "-progress", "pipe:1", "-nostats", "-i", source.FilePath };
+        var args = new List<string> { "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats", "-i", source.FilePath };
 
         bool includeAudio = source.HasAudio && options.Audio != AudioMode.Mute;
         var filterParts = new List<string>();
@@ -355,7 +355,7 @@ public static class FfmpegCommandBuilder
         string outputPath,
         CompressionOptions options)
     {
-        var args = new List<string> { "-hide_banner", "-y", "-progress", "pipe:1", "-nostats" };
+        var args = new List<string> { "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats" };
 
         bool isFullVideo = segment.Start <= TimeSpan.FromMilliseconds(50) &&
                            segment.End >= source.Duration - TimeSpan.FromMilliseconds(50);
@@ -402,7 +402,7 @@ public static class FfmpegCommandBuilder
     {
         var args = new List<string>
         {
-            "-hide_banner", "-y", "-progress", "pipe:1", "-nostats",
+            "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats",
             "-f", "concat", "-safe", "0",
             "-i", concatListPath,
             "-c:v", "copy"

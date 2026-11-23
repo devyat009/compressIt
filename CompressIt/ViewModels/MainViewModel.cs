@@ -27,7 +27,10 @@ public partial class MainViewModel : ObservableObject
 
     private CancellationTokenSource? _exportCts;
     private CancellationTokenSource? _thumbCts;
+    private CancellationTokenSource? _batchCts;
+    private CancellationTokenSource? _batchThumbCts;
     private string? _currentThumbTempDir;
+    private string? _batchThumbTempDir;
 
     public ObservableCollection<CodecOption> CodecOptions { get; } =
     [
@@ -180,10 +183,44 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnErrorBannerTextChanged(string? value) => OnPropertyChanged(nameof(HasErrorBanner));
 
-    public bool IsAnyOverlayOpen =>
-        IsInitializingFfmpeg || IsSettingsOpen || IsExportConfigOpen || IsExporting || IsResultOpen || IsUpdatePopupOpen;
+    // Batch / Mass Folder Compression
+    public ObservableCollection<BatchVideoItemViewModel> BatchItems { get; } = [];
+    public IReadOnlyList<int> BatchParallelOptions { get; } = [1, 2, 3, 4];
 
-    public bool IsVideoPlayerVisible => HasVideo && !IsAnyOverlayOpen;
+    [ObservableProperty] private bool _isBatchMode;
+    [ObservableProperty] private string _batchSourceFolder = string.Empty;
+    [ObservableProperty] private string _batchOutputDirectory = string.Empty;
+    [ObservableProperty] private int _batchMaxParallelJobs = 2;
+    [ObservableProperty] private bool _isBatchRunning;
+    [ObservableProperty] private bool _hasBatchSummaryResult;
+    [ObservableProperty] private string _batchStatusSummary = "Select a folder with videos";
+    [ObservableProperty] private string _batchTotalOriginalText = string.Empty;
+    [ObservableProperty] private string _batchTotalCompressedText = string.Empty;
+    [ObservableProperty] private string _batchTotalSavedBadgeText = string.Empty;
+
+    [ObservableProperty] private bool _isCardSettingsOpen;
+    [ObservableProperty] private BatchVideoItemViewModel? _editingCardItem;
+    [ObservableProperty] private bool _cardUseCustomSettings;
+    [ObservableProperty] private bool _cardEnableCompression = true;
+    [ObservableProperty] private CodecOption? _cardCodecOption;
+    [ObservableProperty] private SpeedOption? _cardSpeedOption;
+    [ObservableProperty] private FpsOption? _cardFpsOption;
+    [ObservableProperty] private int _cardQualityPercent = 85;
+    [ObservableProperty] private ContainerOption? _cardContainerOption;
+    [ObservableProperty] private ResolutionOption? _cardResolutionOption;
+    [ObservableProperty] private AudioOption? _cardAudioOption;
+
+    public bool ShowSingleEditor => !IsBatchMode;
+    public bool IsNotBatchRunning => !IsBatchRunning;
+    public string CardQualityPercentLabel => $"{CardQualityPercent}%";
+    public string CardQualityTierLabel => FormatHelper.GetQualityTier(CardQualityPercent);
+    public string BatchCompressButtonText =>
+        $"Compress Selected ({BatchItems.Count(i => i.IsSelected)})";
+
+    public bool IsAnyOverlayOpen =>
+        IsInitializingFfmpeg || IsSettingsOpen || IsExportConfigOpen || IsExporting || IsResultOpen || IsUpdatePopupOpen || IsCardSettingsOpen;
+
+    public bool IsVideoPlayerVisible => HasVideo && !IsAnyOverlayOpen && !IsBatchMode;
 
     public bool ShowEmptyDropzone => !HasVideo && !IsLoadingVideo;
 
@@ -365,6 +402,22 @@ public partial class MainViewModel : ObservableObject
     partial void OnIsExportingChanged(bool value) => OnPropertyChangedAllOverlayStates();
     partial void OnIsResultOpenChanged(bool value) => OnPropertyChangedAllOverlayStates();
     partial void OnIsUpdatePopupOpenChanged(bool value) => OnPropertyChangedAllOverlayStates();
+    partial void OnIsCardSettingsOpenChanged(bool value) => OnPropertyChangedAllOverlayStates();
+
+    partial void OnIsBatchModeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowSingleEditor));
+        OnPropertyChanged(nameof(IsVideoPlayerVisible));
+        if (value) PlayerPauseRequested?.Invoke();
+    }
+
+    partial void OnIsBatchRunningChanged(bool value) => OnPropertyChanged(nameof(IsNotBatchRunning));
+
+    partial void OnCardQualityPercentChanged(int value)
+    {
+        OnPropertyChanged(nameof(CardQualityPercentLabel));
+        OnPropertyChanged(nameof(CardQualityTierLabel));
+    }
     partial void OnIsCheckingUpdatesChanged(bool value) => OnPropertyChanged(nameof(IsNotCheckingUpdates));
     partial void OnIsDownloadingUpdateChanged(bool value)
     {
@@ -750,6 +803,7 @@ public partial class MainViewModel : ObservableObject
         }
 
         ErrorBannerText = null;
+        IsBatchMode = false;
         IsResultOpen = false;
         IsExportConfigOpen = false;
         LoadingVideoName = Path.GetFileName(filePath);
@@ -1086,4 +1140,376 @@ public partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void DismissError() => ErrorBannerText = null;
+
+    public CompressionOptions BuildCurrentGlobalOptions() => new()
+    {
+        EnableCompression = EnableCompression,
+        Codec = SelectedCodecOption.Codec,
+        Speed = SelectedSpeedOption.Speed,
+        TargetFps = SelectedFpsOption.Fps,
+        QualityPercent = QualityPercent,
+        Container = SelectedContainerOption.Format,
+        Resolution = SelectedResolutionOption.Resolution,
+        Audio = SelectedAudioOption.Mode
+    };
+
+    public async Task LoadBatchFolderAsync(string folderPath)
+    {
+        if (IsBatchRunning) return;
+        if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+        {
+            ErrorBannerText = "Selected folder does not exist.";
+            return;
+        }
+
+        var (ffmpegPath, ffprobePath) = FFmpegDownloadService.ResolvePaths(Settings.CustomFfmpegDirectory);
+        if (!File.Exists(ffmpegPath) || !File.Exists(ffprobePath))
+        {
+            await EnsureFfmpegAndDetectHardwareAsync(forceRedownload: false);
+            if (IsInitializingFfmpeg) return;
+            (ffmpegPath, ffprobePath) = FFmpegDownloadService.ResolvePaths(Settings.CustomFfmpegDirectory);
+        }
+
+        ErrorBannerText = null;
+        HasBatchSummaryResult = false;
+        BatchSourceFolder = folderPath;
+        BatchOutputDirectory = Path.Combine(folderPath, "compressed");
+        BatchMaxParallelJobs = (UseGpuAcceleration && Hardware.SupportsGpuEncoding) ? 2 : 1;
+
+        var files = BatchCompressionService.EnumerateVideosInFolder(folderPath);
+
+        _batchThumbCts?.Cancel();
+        _batchThumbCts?.Dispose();
+        _batchThumbCts = new CancellationTokenSource();
+        CleanupBatchThumbTempDir();
+        _batchThumbTempDir = Path.Combine(Path.GetTempPath(), "CompressIt_BatchThumbs", Guid.NewGuid().ToString("N"));
+
+        BatchItems.Clear();
+        var snapshot = BuildCurrentGlobalOptions();
+        foreach (var file in files)
+        {
+            var card = new BatchVideoItemViewModel(file, snapshot);
+            card.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(BatchVideoItemViewModel.IsSelected))
+                {
+                    OnPropertyChanged(nameof(BatchCompressButtonText));
+                    UpdateBatchIdleSummary();
+                }
+            };
+            BatchItems.Add(card);
+        }
+
+        IsBatchMode = true;
+        OnPropertyChanged(nameof(BatchCompressButtonText));
+        UpdateBatchIdleSummary();
+
+        if (BatchItems.Count > 0)
+        {
+            _ = PopulateBatchMetadataAndThumbnailsAsync(ffmpegPath, ffprobePath, _batchThumbTempDir, _batchThumbCts.Token);
+        }
+    }
+
+    private void UpdateBatchIdleSummary()
+    {
+        if (IsBatchRunning || HasBatchSummaryResult) return;
+        int total = BatchItems.Count;
+        int selected = BatchItems.Count(i => i.IsSelected);
+        BatchStatusSummary = total == 0
+            ? "No supported video files found in this folder"
+            : $"{total} video{(total == 1 ? "" : "s")} found • {selected} selected";
+    }
+
+    private async Task PopulateBatchMetadataAndThumbnailsAsync(
+        string ffmpegPath,
+        string ffprobePath,
+        string thumbDir,
+        CancellationToken ct)
+    {
+        using var sem = new SemaphoreSlim(4);
+        var items = BatchItems.ToList();
+
+        var tasks = items.Select(async (item, index) =>
+        {
+            await sem.WaitAsync(ct);
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                var meta = await _videoProcessor.ProbeAsync(ffprobePath, item.FilePath, ct);
+                Application.Current.Dispatcher.Invoke(() => item.ApplyMetadata(meta));
+
+                string thumbPath = Path.Combine(thumbDir, $"card_{index:D4}.jpg");
+                var extracted = await _videoProcessor.ExtractSingleThumbnailAsync(ffmpegPath, item.FilePath, meta.Duration, thumbPath, ct);
+                if (!string.IsNullOrEmpty(extracted) && !ct.IsCancellationRequested)
+                {
+                    Application.Current.Dispatcher.Invoke(() => item.LoadThumbnailFromFile(extracted));
+                }
+            }
+            catch
+            {
+                // Keep card usable even if probe/thumbnail fails on one file.
+            }
+            finally
+            {
+                sem.Release();
+            }
+        });
+
+        try { await Task.WhenAll(tasks); } catch { }
+    }
+
+    public void CleanupBatchThumbTempDir()
+    {
+        if (string.IsNullOrEmpty(_batchThumbTempDir)) return;
+        try
+        {
+            if (Directory.Exists(_batchThumbTempDir))
+            {
+                Directory.Delete(_batchThumbTempDir, recursive: true);
+            }
+        }
+        catch { }
+        _batchThumbTempDir = null;
+    }
+
+    [RelayCommand]
+    private void ExitBatchMode()
+    {
+        if (IsBatchRunning) return;
+        IsBatchMode = false;
+    }
+
+    [RelayCommand]
+    private void SelectAllBatch()
+    {
+        foreach (var item in BatchItems) item.IsSelected = true;
+    }
+
+    [RelayCommand]
+    private void DeselectAllBatch()
+    {
+        foreach (var item in BatchItems) item.IsSelected = false;
+    }
+
+    [RelayCommand]
+    private void ApplyGlobalToAllCards()
+    {
+        if (IsBatchRunning) return;
+        var snapshot = BuildCurrentGlobalOptions();
+        foreach (var item in BatchItems)
+        {
+            item.UseCustomSettings = false;
+            item.CustomOptions = snapshot.Clone();
+            item.RefreshBadge();
+        }
+    }
+
+    [RelayCommand]
+    private void OpenCardSettings(BatchVideoItemViewModel? card)
+    {
+        if (card is null || IsBatchRunning) return;
+
+        EditingCardItem = card;
+        var sourceOpts = card.UseCustomSettings ? card.CustomOptions : BuildCurrentGlobalOptions();
+
+        CardUseCustomSettings = card.UseCustomSettings;
+        CardEnableCompression = sourceOpts.EnableCompression;
+        CardCodecOption = CodecOptions.FirstOrDefault(c => c.Codec == sourceOpts.Codec) ?? CodecOptions[0];
+        CardSpeedOption = SpeedOptions.FirstOrDefault(s => s.Speed == sourceOpts.Speed) ?? SpeedOptions[2];
+        CardFpsOption = FpsOptions.FirstOrDefault(f => f.Fps == sourceOpts.TargetFps) ?? FpsOptions[0];
+        CardQualityPercent = Math.Clamp(sourceOpts.QualityPercent, 1, 100);
+        CardContainerOption = ContainerOptions.FirstOrDefault(c => c.Format == sourceOpts.Container) ?? ContainerOptions[0];
+        CardResolutionOption = ResolutionOptions.FirstOrDefault(r => r.Resolution == sourceOpts.Resolution) ?? ResolutionOptions[0];
+        CardAudioOption = AudioOptions.FirstOrDefault(a => a.Mode == sourceOpts.Audio) ?? AudioOptions[0];
+
+        IsCardSettingsOpen = true;
+    }
+
+    [RelayCommand]
+    private void SaveCardSettings()
+    {
+        if (EditingCardItem is null) return;
+
+        EditingCardItem.UseCustomSettings = CardUseCustomSettings;
+        EditingCardItem.CustomOptions = new CompressionOptions
+        {
+            EnableCompression = CardEnableCompression,
+            Codec = CardCodecOption?.Codec ?? VideoCodec.H264,
+            Speed = CardSpeedOption?.Speed ?? EncodingSpeed.Balanced,
+            TargetFps = CardFpsOption?.Fps,
+            QualityPercent = CardQualityPercent,
+            Container = CardContainerOption?.Format ?? ContainerFormat.Auto,
+            Resolution = CardResolutionOption?.Resolution ?? OutputResolution.Original,
+            Audio = CardAudioOption?.Mode ?? AudioMode.Aac192
+        };
+        EditingCardItem.RefreshBadge();
+        IsCardSettingsOpen = false;
+    }
+
+    [RelayCommand]
+    private void ResetCardToGlobal()
+    {
+        if (EditingCardItem is null) return;
+        EditingCardItem.UseCustomSettings = false;
+        EditingCardItem.CustomOptions = BuildCurrentGlobalOptions();
+        EditingCardItem.RefreshBadge();
+        IsCardSettingsOpen = false;
+    }
+
+    [RelayCommand]
+    private void CloseCardSettings() => IsCardSettingsOpen = false;
+
+    [RelayCommand]
+    private async Task StartBatchCompressionAsync()
+    {
+        if (IsBatchRunning) return;
+
+        var selected = BatchItems.Where(i => i.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            ErrorBannerText = "Select at least one video to compress.";
+            return;
+        }
+
+        var (ffmpegPath, ffprobePath) = FFmpegDownloadService.ResolvePaths(Settings.CustomFfmpegDirectory);
+        if (!File.Exists(ffmpegPath) || !File.Exists(ffprobePath))
+        {
+            ErrorBannerText = "FFmpeg executable is missing.";
+            return;
+        }
+
+        ErrorBannerText = null;
+        HasBatchSummaryResult = false;
+        IsBatchRunning = true;
+
+        _batchCts?.Cancel();
+        _batchCts?.Dispose();
+        _batchCts = new CancellationTokenSource();
+        var ct = _batchCts.Token;
+
+        string outputDir = string.IsNullOrWhiteSpace(BatchOutputDirectory)
+            ? Path.Combine(BatchSourceFolder, "compressed")
+            : BatchOutputDirectory;
+        Directory.CreateDirectory(outputDir);
+
+        var globalOptions = BuildCurrentGlobalOptions();
+        foreach (var item in selected)
+        {
+            item.Status = BatchJobStatus.Queued;
+            item.ProgressPercent = 0;
+            item.SpeedText = string.Empty;
+            item.ErrorMessage = null;
+        }
+
+        int completedCount = 0;
+        int failedCount = 0;
+        BatchStatusSummary = $"Compressing 0/{selected.Count} (Parallel workers: {BatchMaxParallelJobs})...";
+
+        try
+        {
+            await BatchCompressionService.RunParallelAsync(selected, BatchMaxParallelJobs, async (card, token) =>
+            {
+                Application.Current.Dispatcher.Invoke(() => card.Status = BatchJobStatus.Compressing);
+
+                var meta = card.Metadata ?? await _videoProcessor.ProbeAsync(ffprobePath, card.FilePath, token);
+                var opts = card.UseCustomSettings ? card.CustomOptions.Clone() : globalOptions.Clone();
+                var segments = SegmentManager.CreateInitial(meta.Duration);
+
+                var request = new ExportRequest
+                {
+                    SourceVideo = meta,
+                    OutputDirectory = outputDir,
+                    OutputBaseName = Path.GetFileNameWithoutExtension(meta.FileName),
+                    Container = opts.Container,
+                    MergeSegments = true,
+                    Segments = segments,
+                    Options = opts,
+                    UseGpu = UseGpuAcceleration,
+                    Hardware = Hardware
+                };
+
+                var progress = new Progress<ExportProgress>(p =>
+                {
+                    card.ProgressPercent = p.Percent;
+                    card.SpeedText = p.SpeedText;
+                });
+
+                var result = await _videoProcessor.ExportAsync(request, ffmpegPath, progress, token);
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    if (result.WasCancelled)
+                    {
+                        card.Status = BatchJobStatus.Cancelled;
+                    }
+                    else if (result.Success)
+                    {
+                        card.ProgressPercent = 100;
+                        card.CompressedSizeBytes = result.CompressedSizeBytes;
+                        card.OutputFilePath = result.OutputFiles.FirstOrDefault() ?? string.Empty;
+                        card.Status = BatchJobStatus.Completed;
+                        Interlocked.Increment(ref completedCount);
+                    }
+                    else
+                    {
+                        card.ErrorMessage = result.ErrorMessage ?? "Failed";
+                        card.Status = BatchJobStatus.Failed;
+                        Interlocked.Increment(ref failedCount);
+                    }
+
+                    BatchStatusSummary = $"Compressing {completedCount + failedCount}/{selected.Count} (Parallel workers: {BatchMaxParallelJobs})...";
+                });
+            }, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            foreach (var card in selected.Where(c => c.Status is BatchJobStatus.Queued or BatchJobStatus.Compressing))
+            {
+                card.Status = BatchJobStatus.Cancelled;
+            }
+        }
+        finally
+        {
+            IsBatchRunning = false;
+        }
+
+        var succeeded = selected.Where(c => c.Status == BatchJobStatus.Completed).ToList();
+        if (succeeded.Count > 0)
+        {
+            long totalOrig = succeeded.Sum(c => c.FileSizeBytes);
+            long totalComp = succeeded.Sum(c => c.CompressedSizeBytes);
+            double savedPct = totalOrig > 0 ? (1.0 - (double)totalComp / totalOrig) * 100.0 : 0;
+
+            BatchTotalOriginalText = FormatHelper.FormatFileSize(totalOrig);
+            BatchTotalCompressedText = FormatHelper.FormatFileSize(totalComp);
+            BatchTotalSavedBadgeText = savedPct >= 0 ? $"-{savedPct:0.1}% saved" : $"+{Math.Abs(savedPct):0.1}%";
+            HasBatchSummaryResult = true;
+            BatchStatusSummary = failedCount > 0
+                ? $"Completed {succeeded.Count}/{selected.Count} ({failedCount} failed)"
+                : $"Completed {succeeded.Count}/{selected.Count} videos!";
+
+            if (PlayCompletionSound)
+            {
+                CompletionSoundService.PlaySuccessChime();
+            }
+        }
+        else if (ct.IsCancellationRequested)
+        {
+            BatchStatusSummary = "Batch compression cancelled.";
+        }
+        else
+        {
+            BatchStatusSummary = $"Batch finished with {failedCount} error(s).";
+        }
+    }
+
+    [RelayCommand]
+    private void CancelBatchCompression() => _batchCts?.Cancel();
+
+    [RelayCommand]
+    private void OpenBatchOutputFolder()
+    {
+        if (string.IsNullOrWhiteSpace(BatchOutputDirectory) || !Directory.Exists(BatchOutputDirectory)) return;
+        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{BatchOutputDirectory}\"") { UseShellExecute = true });
+    }
 }

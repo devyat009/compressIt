@@ -92,6 +92,7 @@ public partial class MainWindow : FluentWindow
     {
         App.ExternalFileRequested -= OnExternalFileRequested;
         _vm.CleanupThumbnailTempDir();
+        _vm.CleanupBatchThumbTempDir();
 
         _mediaPlayer?.Stop();
         _currentMedia?.Dispose();
@@ -221,6 +222,64 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    private async void OpenBatchFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Select Folder Containing Videos to Compress",
+            InitialDirectory = Directory.Exists(_vm.BatchSourceFolder)
+                ? _vm.BatchSourceFolder
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyVideos)
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            await _vm.LoadBatchFolderAsync(dialog.FolderName);
+        }
+    }
+
+    private void BrowseBatchOutputFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Choose Batch Output Folder",
+            InitialDirectory = Directory.Exists(_vm.BatchOutputDirectory)
+                ? _vm.BatchOutputDirectory
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyVideos)
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            _vm.BatchOutputDirectory = dialog.FolderName;
+        }
+    }
+
+    private void BatchCardThumbnail_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_vm.IsNotBatchRunning) return;
+
+        if (e.OriginalSource is DependencyObject source &&
+            (FindVisualAncestor<System.Windows.Controls.Primitives.ButtonBase>(source) is not null))
+        {
+            return;
+        }
+
+        if (sender is FrameworkElement { DataContext: BatchVideoItemViewModel item })
+        {
+            item.IsSelected = !item.IsSelected;
+        }
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject current) where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match) return match;
+            current = System.Windows.Media.VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
     private void ToggleMuteButton_Click(object sender, RoutedEventArgs e)
     {
         _vm.IsMuted = !_vm.IsMuted;
@@ -264,7 +323,7 @@ public partial class MainWindow : FluentWindow
         if (e.Data.GetDataPresent(DataFormats.FileDrop))
         {
             var files = e.Data.GetData(DataFormats.FileDrop) as string[];
-            if (files is { Length: > 0 } && IsSupportedVideo(files[0]))
+            if (files is { Length: > 0 } && (Directory.Exists(files[0]) || IsSupportedVideo(files[0])))
             {
                 e.Effects = DragDropEffects.Copy;
                 e.Handled = true;
@@ -277,9 +336,16 @@ public partial class MainWindow : FluentWindow
 
     private async void Window_Drop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0 && IsSupportedVideo(files[0]))
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
         {
-            await _vm.LoadVideoAsync(files[0]);
+            if (Directory.Exists(files[0]))
+            {
+                await _vm.LoadBatchFolderAsync(files[0]);
+            }
+            else if (IsSupportedVideo(files[0]))
+            {
+                await _vm.LoadVideoAsync(files[0]);
+            }
         }
     }
 

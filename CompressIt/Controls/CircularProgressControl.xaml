@@ -1,0 +1,25 @@
+<UserControl x:Class="CompressIt.Controls.CircularProgressControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="{Binding Size, RelativeSource={RelativeSource Self}}"
+             Height="{Binding Size, RelativeSource={RelativeSource Self}}">
+    <Grid>
+        <Ellipse x:Name="TrackEllipse"
+                 Stroke="{Binding TrackBrush, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                 StrokeThickness="{Binding StrokeThickness, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+
+        <Path x:Name="ProgressArcPath"
+              Stroke="{Binding RingBrush, RelativeSource={RelativeSource AncestorType=UserControl}}"
+              StrokeThickness="{Binding StrokeThickness, RelativeSource={RelativeSource AncestorType=UserControl}}"
+              StrokeStartLineCap="Round"
+              StrokeEndLineCap="Round" />
+
+        <TextBlock x:Name="PercentLabel"
+                   Text="0%"
+                   FontSize="15"
+                   FontWeight="Bold"
+                   Foreground="#FFFFFFFF"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center" />
+    </Grid>
+</UserControl>

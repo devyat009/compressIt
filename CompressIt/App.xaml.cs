@@ -54,6 +54,15 @@ public partial class App : Application
 
         try
         {
+            Wpf.Ui.Appearance.ApplicationThemeManager.Apply(
+                Wpf.Ui.Appearance.ApplicationTheme.Dark,
+                Wpf.Ui.Controls.WindowBackdropType.Mica,
+                false);
+        }
+        catch { }
+
+        try
+        {
             var win = new MainWindow();
             win.Show();
         }

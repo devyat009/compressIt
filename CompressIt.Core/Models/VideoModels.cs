@@ -164,3 +164,13 @@ public sealed class FfmpegDownloadProgress
     public double Percent { get; init; }
     public string Status { get; init; } = string.Empty;
 }
+
+public enum BatchJobStatus
+{
+    Idle,
+    Queued,
+    Compressing,
+    Completed,
+    Failed,
+    Cancelled
+}

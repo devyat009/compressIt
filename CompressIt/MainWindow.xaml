@@ -25,6 +25,15 @@
         <conv:PlayPauseSymbolConverter x:Key="PlayPauseSymbol" />
         <conv:MuteSymbolConverter x:Key="MuteSymbol" />
         <conv:SoundBellSymbolConverter x:Key="SoundBellSymbol" />
+
+        <Style x:Key="GreenActionButtonStyle" TargetType="{x:Type ui:Button}" BasedOn="{StaticResource DefaultUiButtonStyle}">
+            <Setter Property="Background" Value="#FF16A34A" />
+            <Setter Property="MouseOverBackground" Value="#FF22C55E" />
+            <Setter Property="PressedBackground" Value="#FF15803D" />
+            <Setter Property="BorderBrush" Value="#FF22C55E" />
+            <Setter Property="MouseOverBorderBrush" Value="#FF4ADE80" />
+            <Setter Property="Foreground" Value="#FFFFFFFF" />
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -71,6 +80,19 @@
                         <StackPanel Orientation="Horizontal">
                             <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" Margin="0,0,6,0" />
                             <TextBlock Text="Open Video" FontSize="12" />
+                        </StackPanel>
+                    </ui:Button>
+
+                    <ui:Button Click="OpenBatchFolderButton_Click"
+                               IsEnabled="{Binding IsNotBatchRunning}"
+                               Appearance="Secondary"
+                               Padding="10,4"
+                               Margin="0,0,6,0"
+                               ToolTip="Open a folder to batch compress multiple videos in parallel">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Width="15" Height="15" Stretch="Uniform" Fill="#4ADE80" Margin="0,0,6,0"
+                                  Data="M3 4C1.9 4 1 4.9 1 6V18C1 19.1 1.9 20 3 20H21C22.1 20 23 19.1 23 18V8C23 6.9 22.1 6 21 6H12L10 4H3ZM10 9.5L15.5 13L10 16.5V9.5Z" />
+                            <TextBlock Text="Batch Folder" FontSize="12" />
                         </StackPanel>
                     </ui:Button>
 
@@ -273,24 +295,52 @@
 
                     <!-- Drawer Footer -->
                     <StackPanel Grid.Row="2" Margin="0,12,0,0">
-                        <Border Background="#18FFFFFF" CornerRadius="8" Padding="10,8" Margin="0,0,0,10">
-                            <StackPanel>
-                                <TextBlock Text="Source Video" FontSize="10" Foreground="#94A3B8" />
-                                <TextBlock Text="{Binding SourceVideoSpecsText}" FontSize="12" FontWeight="SemiBold" Margin="0,2,0,0" />
-                            </StackPanel>
-                        </Border>
+                        <!-- Single Video Footer -->
+                        <StackPanel Visibility="{Binding ShowSingleEditor, Converter={StaticResource BoolToVis}}">
+                            <Border Background="#18FFFFFF" CornerRadius="8" Padding="10,8" Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="Source Video" FontSize="10" Foreground="#94A3B8" />
+                                    <TextBlock Text="{Binding SourceVideoSpecsText}" FontSize="12" FontWeight="SemiBold" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Border>
 
-                        <ui:Button Command="{Binding OpenExportConfigCommand}"
-                                  IsEnabled="{Binding HasVideo}"
-                                  Appearance="Primary"
-                                  HorizontalAlignment="Stretch"
-                                  Height="40"
-                                  FontWeight="SemiBold">
-                            <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="ArrowExportUp24" FontSize="16" Margin="0,0,8,0" />
-                                <TextBlock Text="{Binding ExportPrimaryButtonText}" />
-                            </StackPanel>
-                        </ui:Button>
+                            <ui:Button Command="{Binding OpenExportConfigCommand}"
+                                      IsEnabled="{Binding HasVideo}"
+                                      Appearance="Primary"
+                                      HorizontalAlignment="Stretch"
+                                      Height="40"
+                                      FontWeight="SemiBold">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="ArrowExportUp24" FontSize="16" Margin="0,0,8,0" />
+                                    <TextBlock Text="{Binding ExportPrimaryButtonText}" />
+                                </StackPanel>
+                            </ui:Button>
+                        </StackPanel>
+
+                        <!-- Batch Mode Footer -->
+                        <StackPanel Visibility="{Binding IsBatchMode, Converter={StaticResource BoolToVis}}">
+                            <ui:Button Command="{Binding ApplyGlobalToAllCardsCommand}"
+                                       IsEnabled="{Binding IsNotBatchRunning}"
+                                       Appearance="Secondary"
+                                       HorizontalAlignment="Stretch"
+                                       Height="34"
+                                       Margin="0,0,0,8"
+                                       ToolTip="Reset all video cards to use these global compression settings">
+                                <TextBlock Text="Apply Preset to All Cards" FontSize="12" />
+                            </ui:Button>
+
+                            <ui:Button Command="{Binding StartBatchCompressionCommand}"
+                                       IsEnabled="{Binding IsNotBatchRunning}"
+                                       Style="{StaticResource GreenActionButtonStyle}"
+                                       HorizontalAlignment="Stretch"
+                                       Height="40"
+                                       FontWeight="SemiBold">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="ArrowExportUp24" FontSize="16" Margin="0,0,8,0" />
+                                    <TextBlock Text="{Binding BatchCompressButtonText}" />
+                                </StackPanel>
+                            </ui:Button>
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -337,8 +387,9 @@
                 </DockPanel>
             </Border>
 
-            <!-- Right Main Area: Video Player + Bottom Timeline -->
-            <Grid Grid.Column="1">
+            <!-- Right Main Area (Single Video Editor) -->
+            <Grid Grid.Column="1"
+                  Visibility="{Binding ShowSingleEditor, Converter={StaticResource BoolToVis}}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -364,20 +415,32 @@
                                       FontSize="20"
                                       FontWeight="SemiBold"
                                       HorizontalAlignment="Center" />
-                            <TextBlock Text="Cut segments on the timeline and compress with GPU acceleration"
+                            <TextBlock Text="Cut segments on the timeline or batch-compress an entire folder with GPU acceleration"
                                       FontSize="13"
                                       Foreground="#94A3B8"
                                       HorizontalAlignment="Center"
                                       Margin="0,6,0,20" />
-                            <ui:Button Click="OpenVideoButton_Click"
-                                      Appearance="Primary"
-                                      HorizontalAlignment="Center"
-                                      Padding="20,10">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="FolderOpen24" FontSize="16" Margin="0,0,8,0" />
-                                    <TextBlock Text="Choose Video File" FontWeight="SemiBold" />
-                                </StackPanel>
-                            </ui:Button>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <ui:Button Click="OpenVideoButton_Click"
+                                          Style="{StaticResource GreenActionButtonStyle}"
+                                          Padding="20,10"
+                                          Margin="0,0,10,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="FolderOpen24" FontSize="16" Margin="0,0,8,0" />
+                                        <TextBlock Text="Choose Video File" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </ui:Button>
+
+                                <ui:Button Click="OpenBatchFolderButton_Click"
+                                          Appearance="Secondary"
+                                          Padding="18,10">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Path Width="16" Height="16" Stretch="Uniform" Fill="#4ADE80" Margin="0,0,8,0"
+                                              Data="M3 4C1.9 4 1 4.9 1 6V18C1 19.1 1.9 20 3 20H21C22.1 20 23 19.1 23 18V8C23 6.9 22.1 6 21 6H12L10 4H3ZM10 9.5L15.5 13L10 16.5V9.5Z" />
+                                        <TextBlock Text="Batch Compress Folder" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </ui:Button>
+                            </StackPanel>
                         </StackPanel>
 
                         <!-- Loading Video Animation (prevents white HWND flash while LibVLC buffers first frame) -->
@@ -600,6 +663,308 @@
                                                   ThumbnailPaths="{Binding ThumbnailPaths}"
                                                   ZoomLevel="{Binding TimelineZoomLevel, Mode=TwoWay}" />
                     </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Right Main Area (Batch / Mass Folder Compression View) -->
+            <Grid Grid.Column="1"
+                  Visibility="{Binding IsBatchMode, Converter={StaticResource BoolToVis}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Top Batch Toolbar -->
+                <Border Grid.Row="0"
+                        CornerRadius="12"
+                        Background="#14FFFFFF"
+                        BorderBrush="#24FFFFFF"
+                        BorderThickness="1"
+                        Padding="14,12"
+                        Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:Button Command="{Binding ExitBatchModeCommand}"
+                                           IsEnabled="{Binding IsNotBatchRunning}"
+                                           Appearance="Transparent"
+                                           Padding="10,6"
+                                           Margin="0,0,6,0">
+                                    <TextBlock Text="Back to Editor" FontSize="12" />
+                                </ui:Button>
+
+                                <ui:Button Click="OpenBatchFolderButton_Click"
+                                           IsEnabled="{Binding IsNotBatchRunning}"
+                                           Appearance="Secondary"
+                                           Padding="10,6"
+                                           Margin="0,0,6,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" Margin="0,0,6,0" />
+                                        <TextBlock Text="Change Folder" FontSize="12" />
+                                    </StackPanel>
+                                </ui:Button>
+
+                                <ui:Button Command="{Binding StartBatchCompressionCommand}"
+                                           Visibility="{Binding IsNotBatchRunning, Converter={StaticResource BoolToVis}}"
+                                           Style="{StaticResource GreenActionButtonStyle}"
+                                           Padding="14,6"
+                                           FontWeight="SemiBold">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Play24" FontSize="14" Margin="0,0,6,0" />
+                                        <TextBlock Text="{Binding BatchCompressButtonText}" FontSize="12" />
+                                    </StackPanel>
+                                </ui:Button>
+
+                                <ui:Button Command="{Binding CancelBatchCompressionCommand}"
+                                           Visibility="{Binding IsBatchRunning, Converter={StaticResource BoolToVis}}"
+                                           Appearance="Danger"
+                                           Padding="14,6"
+                                           FontWeight="SemiBold">
+                                    <TextBlock Text="Cancel Batch" FontSize="12" />
+                                </ui:Button>
+                            </StackPanel>
+
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="Batch Folder Compression" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding BatchSourceFolder}" FontSize="11" Foreground="#94A3B8" TextTrimming="CharacterEllipsis" Margin="0,2,12,0" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DockPanel Grid.Row="1">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Output:" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ui:TextBox Text="{Binding BatchOutputDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                            IsEnabled="{Binding IsNotBatchRunning}"
+                                            Width="220"
+                                            FontSize="11"
+                                            Padding="8,4"
+                                            Margin="0,0,6,0" />
+                                <ui:Button Click="BrowseBatchOutputFolderButton_Click"
+                                           IsEnabled="{Binding IsNotBatchRunning}"
+                                           Appearance="Secondary"
+                                           Padding="8,5">
+                                    <TextBlock Text="..." FontSize="11" />
+                                </ui:Button>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:Button Command="{Binding SelectAllBatchCommand}"
+                                           IsEnabled="{Binding IsNotBatchRunning}"
+                                           Appearance="Transparent"
+                                           Padding="8,4"
+                                           Margin="0,0,2,0">
+                                    <TextBlock Text="Select All" FontSize="11" />
+                                </ui:Button>
+                                <ui:Button Command="{Binding DeselectAllBatchCommand}"
+                                           IsEnabled="{Binding IsNotBatchRunning}"
+                                           Appearance="Transparent"
+                                           Padding="8,4"
+                                           Margin="0,0,10,0">
+                                    <TextBlock Text="None" FontSize="11" Foreground="#94A3B8" />
+                                </ui:Button>
+
+                                <TextBlock Text="Parallel GPU Jobs:" FontSize="11" Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ComboBox ItemsSource="{Binding BatchParallelOptions}"
+                                          SelectedItem="{Binding BatchMaxParallelJobs, Mode=TwoWay}"
+                                          IsEnabled="{Binding IsNotBatchRunning}"
+                                          Width="62"
+                                          Padding="6,3"
+                                          Margin="0,0,12,0" />
+
+                                <TextBlock Text="{Binding BatchStatusSummary}"
+                                           FontSize="12"
+                                           Foreground="#4ADE80"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Batch Total Comparison Summary Banner -->
+                <Border Grid.Row="1"
+                        Visibility="{Binding HasBatchSummaryResult, Converter={StaticResource BoolToVis}}"
+                        CornerRadius="10"
+                        Background="#FF111824"
+                        BorderBrush="#444ADE80"
+                        BorderThickness="1"
+                        Padding="14,10"
+                        Margin="0,0,0,10">
+                    <DockPanel>
+                        <ui:Button DockPanel.Dock="Right"
+                                   Command="{Binding OpenBatchOutputFolderCommand}"
+                                   Style="{StaticResource GreenActionButtonStyle}"
+                                   Padding="12,6">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" Margin="0,0,6,0" />
+                                <TextBlock Text="Open Output Folder" FontSize="12" />
+                            </StackPanel>
+                        </ui:Button>
+
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="20" Foreground="#4ADE80" Margin="0,0,10,0" />
+                            <TextBlock Text="Total Saved: " FontSize="13" Foreground="#CBD5E1" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding BatchTotalOriginalText}" FontSize="15" FontWeight="Bold" Foreground="#FFFFFFFF" VerticalAlignment="Center" />
+                            <TextBlock Text="  →  " FontSize="14" Foreground="#94A3B8" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding BatchTotalCompressedText}" FontSize="15" FontWeight="Bold" Foreground="#4ADE80" VerticalAlignment="Center" />
+                            <Border Background="#224ADE80" CornerRadius="10" Padding="8,2" Margin="10,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding BatchTotalSavedBadgeText}" Foreground="#4ADE80" FontSize="11" FontWeight="Bold" />
+                            </Border>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- Video Cards Grid -->
+                <Border Grid.Row="2"
+                        CornerRadius="12"
+                        Background="#FF090D14"
+                        BorderBrush="#24FFFFFF"
+                        BorderThickness="1"
+                        Padding="12">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding BatchItems}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="248"
+                                            Margin="0,0,12,12"
+                                            CornerRadius="10"
+                                            Background="#14FFFFFF"
+                                            BorderBrush="{Binding CardBorderBrush}"
+                                            Opacity="{Binding CardOpacity}"
+                                            BorderThickness="1.5"
+                                            ClipToBounds="True">
+                                        <StackPanel>
+                                            <!-- Thumbnail + Circular Progress Overlay (click anywhere to select/deselect) -->
+                                            <Grid Height="138"
+                                                  Background="#FF0D131D"
+                                                  Cursor="Hand"
+                                                  MouseLeftButtonUp="BatchCardThumbnail_MouseLeftButtonUp"
+                                                  ToolTip="Click thumbnail to select / deselect">
+                                                <!-- Placeholder behind thumbnail -->
+                                                <ui:SymbolIcon Symbol="VideoClip24"
+                                                               FontSize="32"
+                                                               Foreground="#33FFFFFF"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" />
+
+                                                <Image Source="{Binding ThumbnailImage}"
+                                                       Stretch="UniformToFill" />
+
+                                                <!-- Queued Overlay -->
+                                                <Grid Background="#99090D14"
+                                                      Visibility="{Binding IsQueued, Converter={StaticResource BoolToVis}}">
+                                                    <Border Background="#33FFFFFF" CornerRadius="8" Padding="10,4" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                        <TextBlock Text="Queued..." FontSize="12" FontWeight="SemiBold" Foreground="#E2E8F0" />
+                                                    </Border>
+                                                </Grid>
+
+                                                <!-- Compressing Overlay with Circular Progress Bar & Percentage -->
+                                                <Grid Background="#BF090D14"
+                                                      Visibility="{Binding IsCompressing, Converter={StaticResource BoolToVis}}">
+                                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                        <controls:CircularProgressControl Value="{Binding ProgressPercent}"
+                                                                                          Size="74"
+                                                                                          StrokeThickness="6" />
+                                                        <TextBlock Text="{Binding SpeedText}"
+                                                                   FontSize="10"
+                                                                   Foreground="#CBD5E1"
+                                                                   HorizontalAlignment="Center"
+                                                                   Margin="0,4,0,0" />
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <!-- Completed Overlay (White -> Green Size Comparison) -->
+                                                <Grid Background="#B8090D14"
+                                                      Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVis}}">
+                                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                        <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="26" Foreground="#4ADE80" Margin="0,0,0,4" />
+                                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                            <TextBlock Text="{Binding OriginalSizeText}" FontSize="12" FontWeight="Bold" Foreground="#FFFFFFFF" />
+                                                            <TextBlock Text=" → " FontSize="12" Foreground="#94A3B8" />
+                                                            <TextBlock Text="{Binding CompressedSizeText}" FontSize="12" FontWeight="Bold" Foreground="#4ADE80" />
+                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding SavedPercentText}"
+                                                                   FontSize="11"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#4ADE80"
+                                                                   HorizontalAlignment="Center"
+                                                                   Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <!-- Failed Overlay -->
+                                                <Grid Background="#B82B0909"
+                                                      Visibility="{Binding IsFailed, Converter={StaticResource BoolToVis}}"
+                                                      ToolTip="{Binding ErrorMessage}">
+                                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                        <ui:SymbolIcon Symbol="ErrorCircle24" FontSize="24" Foreground="#F87171" Margin="0,0,0,4" />
+                                                        <TextBlock Text="Failed" FontSize="12" FontWeight="SemiBold" Foreground="#FCA5A5" HorizontalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <!-- Top Controls: Selection Checkbox + Per-Card Settings Gear -->
+                                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                          IsEnabled="{Binding DataContext.IsNotBatchRunning, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          HorizontalAlignment="Left"
+                                                          VerticalAlignment="Top"
+                                                          Margin="8,6,0,0" />
+
+                                                <ui:Button Command="{Binding DataContext.OpenCardSettingsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                           CommandParameter="{Binding}"
+                                                           IsEnabled="{Binding DataContext.IsNotBatchRunning, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                           Appearance="Secondary"
+                                                           HorizontalAlignment="Right"
+                                                           VerticalAlignment="Top"
+                                                           Margin="0,6,6,0"
+                                                           Padding="6,4"
+                                                           ToolTip="Configure custom compression settings for this video">
+                                                    <ui:SymbolIcon Symbol="Settings20" FontSize="13" />
+                                                </ui:Button>
+
+                                                <!-- Duration Badge -->
+                                                <Border Background="#CC090D14"
+                                                        CornerRadius="4"
+                                                        Padding="6,2"
+                                                        HorizontalAlignment="Right"
+                                                        VerticalAlignment="Bottom"
+                                                        Margin="0,0,6,6">
+                                                    <TextBlock Text="{Binding DurationText}" FontSize="10" FontWeight="SemiBold" Foreground="#FFFFFFFF" />
+                                                </Border>
+                                            </Grid>
+
+                                            <!-- Card Details -->
+                                            <StackPanel Margin="10,8,10,10">
+                                                <TextBlock Text="{Binding FileName}"
+                                                           FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#FFFFFFFF"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding FileName}" />
+                                                <TextBlock Text="{Binding SpecsText}"
+                                                           FontSize="11"
+                                                           Foreground="#94A3B8"
+                                                           Margin="0,2,0,4" />
+                                                <Border Background="#1AFFFFFF" CornerRadius="4" Padding="6,2" HorizontalAlignment="Left">
+                                                    <TextBlock Text="{Binding SettingsSummaryBadge}" FontSize="10" Foreground="#4ADE80" FontWeight="SemiBold" />
+                                                </Border>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                 </Border>
             </Grid>
         </Grid>
@@ -1053,7 +1418,7 @@
 
                     <ui:Button Grid.Row="2"
                               Command="{Binding CloseSettingsCommand}"
-                              Appearance="Primary"
+                              Style="{StaticResource GreenActionButtonStyle}"
                               HorizontalAlignment="Right"
                               Margin="0,14,0,0"
                               Padding="18,8">
@@ -1151,6 +1516,128 @@
                         </StackPanel>
                     </DockPanel>
                 </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- OVERLAY 7: Per-Card Batch Compression Settings -->
+        <Grid Grid.Row="1" Grid.RowSpan="2"
+              Background="#CC090D14"
+              Visibility="{Binding IsCardSettingsOpen, Converter={StaticResource BoolToVis}}">
+            <Border Width="480"
+                    MaxHeight="680"
+                    Margin="16"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    CornerRadius="16"
+                    Background="#FF161B22"
+                    BorderBrush="#33FFFFFF"
+                    BorderThickness="1"
+                    Padding="24">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Row="0" Margin="0,0,0,14">
+                        <ui:Button DockPanel.Dock="Right" Command="{Binding CloseCardSettingsCommand}" Appearance="Transparent" Padding="6">
+                            <ui:SymbolIcon Symbol="Dismiss24" FontSize="16" />
+                        </ui:Button>
+                        <StackPanel>
+                            <TextBlock Text="Video Compression Settings" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding EditingCardItem.FileName}" FontSize="12" Foreground="#4ADE80" TextTrimming="CharacterEllipsis" Margin="0,2,8,0" />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+                        <StackPanel>
+                            <Border Background="#18FFFFFF" CornerRadius="8" Padding="12,10" Margin="0,0,0,14">
+                                <DockPanel>
+                                    <ui:ToggleSwitch DockPanel.Dock="Right"
+                                                     IsChecked="{Binding CardUseCustomSettings, Mode=TwoWay}"
+                                                     VerticalAlignment="Center" />
+                                    <StackPanel Margin="0,0,10,0">
+                                        <TextBlock Text="Use custom settings for this video" FontSize="13" FontWeight="SemiBold" />
+                                        <TextBlock Text="When off, follows the global preset from the left panel." FontSize="11" Foreground="#94A3B8" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+
+                            <StackPanel IsEnabled="{Binding CardUseCustomSettings}">
+                                <Border Background="#12FFFFFF" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
+                                    <DockPanel>
+                                        <ui:ToggleSwitch DockPanel.Dock="Right"
+                                                         IsChecked="{Binding CardEnableCompression, Mode=TwoWay}"
+                                                         VerticalAlignment="Center" />
+                                        <TextBlock Text="Compress Video (off = Lossless)" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </Border>
+
+                                <StackPanel IsEnabled="{Binding CardEnableCompression}">
+                                    <TextBlock Text="Codec" FontSize="12" FontWeight="SemiBold" Foreground="#CBD5E1" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding CodecOptions}"
+                                              SelectedItem="{Binding CardCodecOption, Mode=TwoWay}"
+                                              DisplayMemberPath="DisplayName"
+                                              Margin="0,0,0,10" />
+
+                                    <TextBlock Text="Encoding Speed" FontSize="12" FontWeight="SemiBold" Foreground="#CBD5E1" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding SpeedOptions}"
+                                              SelectedItem="{Binding CardSpeedOption, Mode=TwoWay}"
+                                              DisplayMemberPath="DisplayName"
+                                              Margin="0,0,0,10" />
+
+                                    <TextBlock Text="Frame Rate (FPS)" FontSize="12" FontWeight="SemiBold" Foreground="#CBD5E1" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding FpsOptions}"
+                                              SelectedItem="{Binding CardFpsOption, Mode=TwoWay}"
+                                              DisplayMemberPath="DisplayName"
+                                              Margin="0,0,0,12" />
+
+                                    <DockPanel Margin="0,0,0,4">
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                            <TextBlock Text="{Binding CardQualityTierLabel}" FontSize="11" Foreground="#4ADE80" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding CardQualityPercentLabel}" FontSize="13" FontWeight="Bold" />
+                                        </StackPanel>
+                                        <TextBlock Text="Quality" FontSize="12" FontWeight="SemiBold" Foreground="#CBD5E1" />
+                                    </DockPanel>
+                                    <Slider Minimum="1" Maximum="100" Value="{Binding CardQualityPercent, Mode=TwoWay}" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,0,0,12" />
+
+                                    <TextBlock Text="Resolution" FontSize="12" FontWeight="SemiBold" Foreground="#CBD5E1" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding ResolutionOptions}"
+                                              SelectedItem="{Binding CardResolutionOption, Mode=TwoWay}"
+                                              DisplayMemberPath="DisplayName"
+                                              Margin="0,0,0,10" />
+                                </StackPanel>
+
+                                <TextBlock Text="Container Format" FontSize="12" FontWeight="SemiBold" Foreground="#CBD5E1" Margin="0,0,0,4" />
+                                <ComboBox ItemsSource="{Binding ContainerOptions}"
+                                          SelectedItem="{Binding CardContainerOption, Mode=TwoWay}"
+                                          DisplayMemberPath="DisplayName"
+                                          Margin="0,0,0,10" />
+
+                                <TextBlock Text="Audio" FontSize="12" FontWeight="SemiBold" Foreground="#CBD5E1" Margin="0,0,0,4" />
+                                <ComboBox ItemsSource="{Binding AudioOptions}"
+                                          SelectedItem="{Binding CardAudioOption, Mode=TwoWay}"
+                                          DisplayMemberPath="DisplayName" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <DockPanel Grid.Row="2" Margin="0,16,0,0">
+                        <ui:Button Command="{Binding ResetCardToGlobalCommand}" Appearance="Transparent" Padding="10,8">
+                            <TextBlock Text="Use Global Preset" FontSize="12" />
+                        </ui:Button>
+
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                            <ui:Button Command="{Binding CloseCardSettingsCommand}" Appearance="Secondary" Margin="0,0,8,0" Padding="14,8">
+                                <TextBlock Text="Cancel" />
+                            </ui:Button>
+                            <ui:Button Command="{Binding SaveCardSettingsCommand}" Appearance="Primary" Padding="18,8" FontWeight="SemiBold">
+                                <TextBlock Text="Apply" />
+                            </ui:Button>
+                        </StackPanel>
+                    </DockPanel>
+                </Grid>
             </Border>
         </Grid>
     </Grid>

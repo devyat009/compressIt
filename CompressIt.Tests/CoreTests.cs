@@ -219,4 +219,46 @@ public class CoreTests
         // Copy audio cannot be used with filter_complex atrim/concat, so builder switches to aac
         Assert.Contains("aac", args);
     }
+
+    [Fact]
+    public async Task BatchCompressionService_EnumeratesVideosAndRespectsParallelLimit()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "CompressIt_BatchTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "a.mp4"), "x");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "b.mkv"), "x");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "ignore.txt"), "x");
+
+            var found = BatchCompressionService.EnumerateVideosInFolder(tempDir);
+            Assert.Equal(2, found.Count);
+            Assert.Equal("a.mp4", Path.GetFileName(found[0]));
+            Assert.Equal("b.mkv", Path.GetFileName(found[1]));
+
+            int active = 0;
+            int maxObserved = 0;
+            var items = Enumerable.Range(1, 5).ToList();
+
+            await BatchCompressionService.RunParallelAsync(items, maxParallelism: 2, async (_, ct) =>
+            {
+                int current = Interlocked.Increment(ref active);
+                int snapshot;
+                do
+                {
+                    snapshot = maxObserved;
+                } while (current > snapshot && Interlocked.CompareExchange(ref maxObserved, current, snapshot) != snapshot);
+
+                await Task.Delay(35, ct);
+                Interlocked.Decrement(ref active);
+            });
+
+            Assert.InRange(maxObserved, 1, 2);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
 }

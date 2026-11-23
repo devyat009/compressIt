@@ -13,6 +13,28 @@
             <SolidColorBrush x:Key="CompressGreenDarkBrush" Color="#16A34A" />
             <SolidColorBrush x:Key="CardSurfaceBrush" Color="#1AFFFFFF" />
             <SolidColorBrush x:Key="PanelBorderBrush" Color="#26FFFFFF" />
+
+            <!-- Keep all button and control text light/white on hover & press -->
+            <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#F8FAFC" />
+            <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#CBD5E1" />
+            <SolidColorBrush x:Key="ButtonForeground" Color="#F8FAFC" />
+            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#E2E8F0" />
+
+            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#16A34A" />
+            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#22C55E" />
+            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#15803D" />
+            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#F8FAFC" />
+            <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#F1F5F9" />
+            <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#22FFFFFF" />
+            <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#2EFFFFFF" />
+
+            <Style TargetType="{x:Type ui:Button}" BasedOn="{StaticResource DefaultUiButtonStyle}">
+                <Setter Property="Foreground" Value="#F8FAFC" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
