@@ -1466,12 +1466,16 @@
                               Foreground="#E2E8F0"
                               Margin="0,0,0,6" />
 
-                    <Border Background="#12FFFFFF" CornerRadius="8" Padding="12" MaxHeight="160" Margin="0,0,0,16">
+                    <Border Background="#12FFFFFF" CornerRadius="8" Padding="12" MaxHeight="210" Margin="0,0,0,16">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <TextBlock Text="{Binding AvailableUpdate.ReleaseNotes}"
-                                      FontSize="12"
-                                      Foreground="#CBD5E1"
-                                      TextWrapping="Wrap" />
+                            <RichTextBox controls:MarkdownTextBehavior.Markdown="{Binding AvailableUpdate.ReleaseNotes}"
+                                         IsReadOnly="True"
+                                         IsDocumentEnabled="True"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="0"
+                                         Foreground="#CBD5E1"
+                                         Focusable="False" />
                         </ScrollViewer>
                     </Border>
 
@@ -1508,7 +1512,7 @@
                             </ui:Button>
                             <ui:Button Command="{Binding DownloadAndInstallUpdateCommand}"
                                       IsEnabled="{Binding IsNotDownloadingUpdate}"
-                                      Appearance="Primary"
+                                      Style="{StaticResource GreenActionButtonStyle}"
                                       Padding="18,8"
                                       FontWeight="SemiBold">
                                 <TextBlock Text="Download &amp; Install" />
